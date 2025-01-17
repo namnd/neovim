@@ -5,7 +5,7 @@ local api = vim.api
 
 local M = {}
 
-local augroup = api.nvim_create_augroup('vim_lsp_diagnostic', {})
+local augroup = api.nvim_create_augroup('nvim.lsp.diagnostic', {})
 
 local DEFAULT_CLIENT_ID = -1
 
@@ -208,7 +208,7 @@ end
 
 --- @param uri string
 --- @param client_id? integer
---- @param diagnostics vim.Diagnostic[]
+--- @param diagnostics lsp.Diagnostic[]
 --- @param is_pull boolean
 local function handle_diagnostics(uri, client_id, diagnostics, is_pull)
   local fname = vim.uri_to_fname(uri)

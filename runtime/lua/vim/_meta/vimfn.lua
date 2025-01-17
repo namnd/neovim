@@ -1037,7 +1037,8 @@ function vim.fn.complete_check() end
 ---     typed text only, or the last completion after
 ---     no item is selected when using the <Up> or
 ---     <Down> keys)
----    inserted  Inserted string. [NOT IMPLEMENTED YET]
+---    completed  Return a dictionary containing the entries of
+---     the currently selected index item.
 ---    preview_winid     Info floating preview window id.
 ---    preview_bufnr     Info floating preview buffer id.
 ---
@@ -3769,6 +3770,20 @@ function vim.fn.getregtype(regname) end
 --- @param opts? table
 --- @return vim.fn.getscriptinfo.ret[]
 function vim.fn.getscriptinfo(opts) end
+
+--- Returns the current stack trace of Vim scripts.
+--- Stack trace is a |List|, of which each item is a |Dictionary|
+--- with the following items:
+---     funcref  The funcref if the stack is at a function,
+---     otherwise this item is omitted.
+---     event  The string of the event description if the
+---     stack is at an autocmd event, otherwise this
+---     item is omitted.
+---     lnum  The line number in the script on the stack.
+---     filepath  The file path of the script on the stack.
+---
+--- @return table[]
+function vim.fn.getstacktrace() end
 
 --- If {tabnr} is not specified, then information about all the
 --- tab pages is returned as a |List|. Each List item is a
@@ -7523,7 +7538,7 @@ function vim.fn.screenstring(row, col) end
 --- @param stopline? integer
 --- @param timeout? integer
 --- @param skip? string|function
---- @return any
+--- @return integer
 function vim.fn.search(pattern, flags, stopline, timeout, skip) end
 
 --- Get or update the last search count, like what is displayed

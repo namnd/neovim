@@ -533,8 +533,8 @@ static void set_string_default(OptIndex opt_idx, char *val, bool allocated)
 
 /// For an option value that contains comma separated items, find "newval" in
 /// "origval".  Return NULL if not found.
-static char *find_dup_item(char *origval, const char *newval, const size_t newvallen,
-                           uint32_t flags)
+static const char *find_dup_item(const char *origval, const char *newval, const size_t newvallen,
+                                 uint32_t flags)
   FUNC_ATTR_NONNULL_ARG(2)
 {
   if (origval == NULL) {
@@ -543,7 +543,7 @@ static char *find_dup_item(char *origval, const char *newval, const size_t newva
 
   int bs = 0;
 
-  for (char *s = origval; *s != NUL; s++) {
+  for (const char *s = origval; *s != NUL; s++) {
     if ((!(flags & kOptFlagComma) || s == origval || (s[-1] == ',' && !(bs & 1)))
         && strncmp(s, newval, newvallen) == 0
         && (!(flags & kOptFlagComma) || s[newvallen] == ',' || s[newvallen] == NUL)) {
@@ -727,7 +727,7 @@ void ex_set(exarg_T *eap)
 
 /// Copy the new string value into allocated memory for the option.
 /// Can't use set_option_direct(), because we need to remove the backslashes.
-static char *stropt_copy_value(char *origval, char **argp, set_op_T op,
+static char *stropt_copy_value(const char *origval, char **argp, set_op_T op,
                                uint32_t flags FUNC_ATTR_UNUSED)
 {
   char *arg = *argp;
@@ -774,7 +774,7 @@ static char *stropt_copy_value(char *origval, char **argp, set_op_T op,
 }
 
 /// Expand environment variables and ~ in string option value 'newval'.
-static char *stropt_expand_envvar(OptIndex opt_idx, char *origval, char *newval, set_op_T op)
+static char *stropt_expand_envvar(OptIndex opt_idx, const char *origval, char *newval, set_op_T op)
 {
   char *s = option_expand(opt_idx, newval);
   if (s == NULL) {
@@ -794,7 +794,7 @@ static char *stropt_expand_envvar(OptIndex opt_idx, char *origval, char *newval,
 
 /// Concatenate the original and new values of a string option, adding a "," if
 /// needed.
-static void stropt_concat_with_comma(char *origval, char *newval, set_op_T op, uint32_t flags)
+static void stropt_concat_with_comma(const char *origval, char *newval, set_op_T op, uint32_t flags)
 {
   int len = 0;
   int comma = ((flags & kOptFlagComma) && *origval != NUL && *newval != NUL);
@@ -820,7 +820,8 @@ static void stropt_concat_with_comma(char *origval, char *newval, set_op_T op, u
 
 /// Remove a value from a string option.  Copy string option value in "origval"
 /// to "newval" and then remove the string "strval" of length "len".
-static void stropt_remove_val(char *origval, char *newval, uint32_t flags, char *strval, int len)
+static void stropt_remove_val(const char *origval, char *newval, uint32_t flags, const char *strval,
+                              int len)
 {
   // Remove newval[] from origval[]. (Note: "len" has been set above
   // and is used here).
@@ -872,13 +873,13 @@ static void stropt_remove_dupflags(char *newval, uint32_t flags)
 ///     set {opt}={val}
 ///     set {opt}:{val}
 static char *stropt_get_newval(int nextchar, OptIndex opt_idx, char **argp, void *varp,
-                               char *origval, set_op_T *op_arg, uint32_t flags)
+                               const char *origval, set_op_T *op_arg, uint32_t flags)
 {
   char *arg = *argp;
   set_op_T op = *op_arg;
   char *save_arg = NULL;
   char *newval;
-  char *s = NULL;
+  const char *s = NULL;
 
   arg++;  // jump to after the '=' or ':'
 
@@ -1194,9 +1195,10 @@ static OptVal get_option_newval(OptIndex opt_idx, int opt_flags, set_prefix_T pr
     break;
   }
   case kOptValTypeString: {
-    char *oldval_str = oldval.data.string.data;
+    const char *oldval_str = oldval.data.string.data;
     // Get the new value for the option
-    char *newval_str = stropt_get_newval(nextchar, opt_idx, argp, varp, oldval_str, &op, flags);
+    const char *newval_str = stropt_get_newval(nextchar, opt_idx, argp, varp, oldval_str, &op,
+                                               flags);
     newval = CSTR_AS_OPTVAL(newval_str);
     break;
   }
@@ -1568,7 +1570,7 @@ char *find_shada_parameter(int type)
 /// These string options cannot be indirect!
 /// If "val" is NULL expand the current value of the option.
 /// Return pointer to NameBuff, or NULL when not expanded.
-static char *option_expand(OptIndex opt_idx, char *val)
+static char *option_expand(OptIndex opt_idx, const char *val)
 {
   // if option doesn't need expansion nothing to do
   if (!(options[opt_idx].flags & kOptFlagExpand) || is_option_hidden(opt_idx)) {
@@ -2118,14 +2120,14 @@ static const char *did_set_laststatus(optset_T *args)
   // When switching to global statusline, decrease topframe height
   // Also clear the cmdline to remove the ruler if there is one
   if (value == 3 && old_value != 3) {
-    frame_new_height(topframe, topframe->fr_height - STATUS_HEIGHT, false, false);
+    frame_new_height(topframe, topframe->fr_height - STATUS_HEIGHT, false, false, false);
     win_comp_pos();
     clear_cmdline = true;
   }
   // When switching from global statusline, increase height of topframe by STATUS_HEIGHT
   // in order to to re-add the space that was previously taken by the global statusline
   if (old_value == 3 && value != 3) {
-    frame_new_height(topframe, topframe->fr_height + STATUS_HEIGHT, false, false);
+    frame_new_height(topframe, topframe->fr_height + STATUS_HEIGHT, false, false, false);
     win_comp_pos();
   }
 
@@ -2870,8 +2872,6 @@ static const char *validate_num_option(OptIndex opt_idx, OptInt *newval, char *e
   case kOptCmdheight:
     if (value < 0) {
       return e_positive;
-    } else {
-      p_ch_was_zero = value == 0;
     }
     break;
   case kOptHistory:
@@ -3121,17 +3121,10 @@ bool optval_equal(OptVal o1, OptVal o2)
   UNREACHABLE;
 }
 
-/// Get type of option. Does not support multitype options.
+/// Get type of option.
 static OptValType option_get_type(const OptIndex opt_idx)
 {
-  assert(!option_is_multitype(opt_idx));
-
-  // If the option only supports a single type, it means that the index of the option's type flag
-  // corresponds to the value of the type enum. So get the index of the type flag using xctz() and
-  // use that as the option's type.
-  OptValType type = xctz(options[opt_idx].type_flags);
-  assert(type > kOptValTypeNil && type < kOptValTypeSize);
-  return type;
+  return options[opt_idx].type;
 }
 
 /// Create OptVal from var pointer.
@@ -3147,11 +3140,6 @@ OptVal optval_from_varp(OptIndex opt_idx, void *varp)
   // changed.
   if ((int *)varp == &curbuf->b_changed) {
     return BOOLEAN_OPTVAL(curbufIsChanged());
-  }
-
-  if (option_is_multitype(opt_idx)) {
-    // Multitype options are stored as OptVal.
-    return *(OptVal *)varp;
   }
 
   OptValType type = option_get_type(opt_idx);
@@ -3264,33 +3252,6 @@ OptVal object_as_optval(Object o, bool *error)
   UNREACHABLE;
 }
 
-/// Get an allocated string containing a list of valid types for an option.
-/// For options with a singular type, it returns the name of the type. For options with multiple
-/// possible types, it returns a slash separated list of types. For example, if an option can be a
-/// number, boolean or string, the function returns "number/boolean/string"
-static char *option_get_valid_types(OptIndex opt_idx)
-{
-  StringBuilder str = KV_INITIAL_VALUE;
-  kv_resize(str, 32);
-
-  // Iterate through every valid option value type and check if the option supports that type
-  for (OptValType type = 0; type < kOptValTypeSize; type++) {
-    if (option_has_type(opt_idx, type)) {
-      const char *typename = optval_type_get_name(type);
-
-      if (str.size == 0) {
-        kv_concat(str, typename);
-      } else {
-        kv_printf(str, "/%s", typename);
-      }
-    }
-  }
-
-  // Ensure that the string is NUL-terminated.
-  kv_push(str, NUL);
-  return str.items;
-}
-
 /// Check if option is hidden.
 ///
 /// @param  opt_idx  Option index in options[] table.
@@ -3303,25 +3264,10 @@ bool is_option_hidden(OptIndex opt_idx)
          && options[opt_idx].var == &options[opt_idx].def_val.data;
 }
 
-/// Check if option is multitype (supports multiple types).
-static bool option_is_multitype(OptIndex opt_idx)
-{
-  const OptTypeFlags type_flags = get_option(opt_idx)->type_flags;
-  assert(type_flags != 0);
-  return !is_power_of_two(type_flags);
-}
-
 /// Check if option supports a specific type.
 bool option_has_type(OptIndex opt_idx, OptValType type)
 {
-  // Ensure that type flags variable can hold all types.
-  STATIC_ASSERT(kOptValTypeSize <= sizeof(OptTypeFlags) * 8,
-                "Option type_flags cannot fit all option types");
-  // Ensure that the type is valid before accessing type_flags.
-  assert(type > kOptValTypeNil && type < kOptValTypeSize);
-  // Bitshift 1 by the value of type to get the type's corresponding flag, and check if it's set in
-  // the type_flags bit field.
-  return get_option(opt_idx)->type_flags & (1 << type);
+  return options[opt_idx].type == type;
 }
 
 /// Check if option supports a specific scope.
@@ -3658,11 +3604,10 @@ static const char *validate_option_value(const OptIndex opt_idx, OptVal *newval,
     }
   } else if (!option_has_type(opt_idx, newval->type)) {
     char *rep = optval_to_cstr(*newval);
-    char *valid_types = option_get_valid_types(opt_idx);
+    const char *type_str = optval_type_get_name(opt->type);
     snprintf(errbuf, IOSIZE, _("Invalid value for option '%s': expected %s, got %s %s"),
-             opt->fullname, valid_types, optval_type_get_name(newval->type), rep);
+             opt->fullname, type_str, optval_type_get_name(newval->type), rep);
     xfree(rep);
-    xfree(valid_types);
     errmsg = errbuf;
   } else if (newval->type == kOptValTypeNumber) {
     // Validate and bound check num option values.
@@ -4392,7 +4337,7 @@ static int put_set(FILE *fd, char *cmd, OptIndex opt_idx, void *varp)
       return FAIL;
     }
 
-    char *value_str = value.data.string.data;
+    const char *value_str = value.data.string.data;
     char *buf = NULL;
     char *part = NULL;
 
@@ -5770,6 +5715,7 @@ int ExpandStringSetting(expand_T *xp, regmatch_T *regmatch, int *numMatches, cha
 
   optexpand_T args = {
     .oe_varp = get_varp_scope(&options[expand_option_idx], expand_option_flags),
+    .oe_idx = expand_option_idx,
     .oe_append = expand_option_append,
     .oe_regmatch = regmatch,
     .oe_xp = xp,

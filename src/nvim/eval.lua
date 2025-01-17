@@ -1398,7 +1398,8 @@ M.funcs = {
       		typed text only, or the last completion after
       		no item is selected when using the <Up> or
       		<Down> keys)
-         inserted	Inserted string. [NOT IMPLEMENTED YET]
+         completed	Return a dictionary containing the entries of
+      		the currently selected index item.
          preview_winid     Info floating preview window id.
          preview_bufnr     Info floating preview buffer id.
 
@@ -4669,6 +4670,25 @@ M.funcs = {
     params = { { 'opts', 'table' } },
     returns = 'vim.fn.getscriptinfo.ret[]',
     signature = 'getscriptinfo([{opts}])',
+  },
+  getstacktrace = {
+    args = 0,
+    desc = [=[
+      Returns the current stack trace of Vim scripts.
+      Stack trace is a |List|, of which each item is a |Dictionary|
+      with the following items:
+          funcref	The funcref if the stack is at a function,
+      		otherwise this item is omitted.
+          event	The string of the event description if the
+      		stack is at an autocmd event, otherwise this
+      		item is omitted.
+          lnum	The line number in the script on the stack.
+          filepath	The file path of the script on the stack.
+    ]=],
+    name = 'getstacktrace',
+    params = {},
+    returns = 'table[]',
+    signature = 'getstacktrace()',
   },
   gettabinfo = {
     args = { 0, 1 },
@@ -9159,6 +9179,7 @@ M.funcs = {
       { 'timeout', 'integer' },
       { 'skip', 'string|function' },
     },
+    returns = 'integer',
     signature = 'search({pattern} [, {flags} [, {stopline} [, {timeout} [, {skip}]]]])',
   },
   searchcount = {
