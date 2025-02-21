@@ -183,8 +183,10 @@ struct terminal {
 
   bool color_set[16];
 
-  char *selection_buffer;  /// libvterm selection buffer
-  StringBuilder selection;  /// Growable array containing full selection data
+  char *selection_buffer;  ///< libvterm selection buffer
+  StringBuilder selection;  ///< Growable array containing full selection data
+
+  StringBuilder termrequest_buffer;  ///< Growable array containing unfinished request payload
 
   size_t refcount;                  // reference count
 };
@@ -307,15 +309,22 @@ static int on_osc(int command, VTermStringFragment frag, void *user)
     return 1;
   }
 
-  StringBuilder request = KV_INITIAL_VALUE;
-  kv_printf(request, "\x1b]%d;", command);
-  kv_concat_len(request, frag.str, frag.len);
-  schedule_termrequest(term, request.items, request.size);
+  if (frag.initial) {
+    kv_size(term->termrequest_buffer) = 0;
+    kv_printf(term->termrequest_buffer, "\x1b]%d;", command);
+  }
+  kv_concat_len(term->termrequest_buffer, frag.str, frag.len);
+  if (frag.final) {
+    char *payload = xmemdup(term->termrequest_buffer.items, term->termrequest_buffer.size);
+    schedule_termrequest(user, payload, term->termrequest_buffer.size);
+  }
   return 1;
 }
 
 static int on_dcs(const char *command, size_t commandlen, VTermStringFragment frag, void *user)
 {
+  Terminal *term = user;
+
   if (command == NULL || frag.str == NULL) {
     return 0;
   }
@@ -323,10 +332,38 @@ static int on_dcs(const char *command, size_t commandlen, VTermStringFragment fr
     return 1;
   }
 
-  StringBuilder request = KV_INITIAL_VALUE;
-  kv_printf(request, "\x1bP%*s", (int)commandlen, command);
-  kv_concat_len(request, frag.str, frag.len);
-  schedule_termrequest(user, request.items, request.size);
+  if (frag.initial) {
+    kv_size(term->termrequest_buffer) = 0;
+    kv_printf(term->termrequest_buffer, "\x1bP%*s", (int)commandlen, command);
+  }
+  kv_concat_len(term->termrequest_buffer, frag.str, frag.len);
+  if (frag.final) {
+    char *payload = xmemdup(term->termrequest_buffer.items, term->termrequest_buffer.size);
+    schedule_termrequest(user, payload, term->termrequest_buffer.size);
+  }
+  return 1;
+}
+
+static int on_apc(VTermStringFragment frag, void *user)
+{
+  Terminal *term = user;
+  if (frag.str == NULL || frag.len == 0) {
+    return 0;
+  }
+
+  if (!has_event(EVENT_TERMREQUEST)) {
+    return 1;
+  }
+
+  if (frag.initial) {
+    kv_size(term->termrequest_buffer) = 0;
+    kv_printf(term->termrequest_buffer, "\x1b_");
+  }
+  kv_concat_len(term->termrequest_buffer, frag.str, frag.len);
+  if (frag.final) {
+    char *payload = xmemdup(term->termrequest_buffer.items, term->termrequest_buffer.size);
+    schedule_termrequest(user, payload, term->termrequest_buffer.size);
+  }
   return 1;
 }
 
@@ -335,7 +372,7 @@ static VTermStateFallbacks vterm_fallbacks = {
   .csi = NULL,
   .osc = on_osc,
   .dcs = on_dcs,
-  .apc = NULL,
+  .apc = on_apc,
   .pm = NULL,
   .sos = NULL,
 };
@@ -625,6 +662,10 @@ bool terminal_enter(void)
   State = MODE_TERMINAL;
   mapped_ctrl_c |= MODE_TERMINAL;  // Always map CTRL-C to avoid interrupt.
   RedrawingDisabled = false;
+  if (!s->term->cursor.visible) {
+    // Hide cursor if it should be hidden. Do so right after setting State, before events.
+    ui_busy_start();
+  }
 
   // Disable these options in terminal-mode. They are nonsense because cursor is
   // placed at end of buffer to "follow" output. #11072
@@ -659,10 +700,6 @@ bool terminal_enter(void)
   showmode();
   curwin->w_redr_status = true;  // For mode() in statusline. #8323
   redraw_custom_title_later();
-  if (!s->term->cursor.visible) {
-    // Hide cursor if it should be hidden
-    ui_busy_start();
-  }
   ui_cursor_shape();
   apply_autocmds(EVENT_TERMENTER, NULL, NULL, false, curbuf);
   may_trigger_modechanged();
@@ -679,6 +716,11 @@ bool terminal_enter(void)
   }
   State = save_state;
   RedrawingDisabled = s->save_rd;
+  if (!s->term->cursor.visible) {
+    // If cursor was hidden, show it again. Do so right after restoring State, before events.
+    ui_busy_stop();
+  }
+
   apply_autocmds(EVENT_TERMLEAVE, NULL, NULL, false, curbuf);
 
   // Restore the terminal cursor to what is set in 'guicursor'
@@ -708,10 +750,6 @@ bool terminal_enter(void)
     showmode();
   } else {
     unshowmode(true);
-  }
-  if (!s->term->cursor.visible) {
-    // If cursor was hidden, show it again
-    ui_busy_stop();
   }
   ui_cursor_shape();
   if (s->close) {
@@ -792,17 +830,23 @@ static int terminal_execute(VimState *state, int key)
   case K_LEFTMOUSE:
   case K_LEFTDRAG:
   case K_LEFTRELEASE:
-  case K_MOUSEMOVE:
   case K_MIDDLEMOUSE:
   case K_MIDDLEDRAG:
   case K_MIDDLERELEASE:
   case K_RIGHTMOUSE:
   case K_RIGHTDRAG:
   case K_RIGHTRELEASE:
+  case K_X1MOUSE:
+  case K_X1DRAG:
+  case K_X1RELEASE:
+  case K_X2MOUSE:
+  case K_X2DRAG:
+  case K_X2RELEASE:
   case K_MOUSEDOWN:
   case K_MOUSEUP:
   case K_MOUSELEFT:
   case K_MOUSERIGHT:
+  case K_MOUSEMOVE:
     if (send_mouse_event(s->term, key)) {
       return 0;
     }
@@ -918,6 +962,7 @@ void terminal_destroy(Terminal **termpp)
     xfree(term->title);
     xfree(term->selection_buffer);
     kv_destroy(term->selection);
+    kv_destroy(term->termrequest_buffer);
     vterm_free(term->vt);
     xfree(term);
     *termpp = NULL;  // coverity[dead-store]
@@ -1804,8 +1849,6 @@ static bool send_mouse_event(Terminal *term, int c)
       pressed = true; FALLTHROUGH;
     case K_LEFTRELEASE:
       button = 1; break;
-    case K_MOUSEMOVE:
-      button = 0; break;
     case K_MIDDLEDRAG:
     case K_MIDDLEMOUSE:
       pressed = true; FALLTHROUGH;
@@ -1816,6 +1859,16 @@ static bool send_mouse_event(Terminal *term, int c)
       pressed = true; FALLTHROUGH;
     case K_RIGHTRELEASE:
       button = 3; break;
+    case K_X1DRAG:
+    case K_X1MOUSE:
+      pressed = true; FALLTHROUGH;
+    case K_X1RELEASE:
+      button = 8; break;
+    case K_X2DRAG:
+    case K_X2MOUSE:
+      pressed = true; FALLTHROUGH;
+    case K_X2RELEASE:
+      button = 9; break;
     case K_MOUSEDOWN:
       pressed = true; button = 4; break;
     case K_MOUSEUP:
@@ -1824,6 +1877,8 @@ static bool send_mouse_event(Terminal *term, int c)
       pressed = true; button = 7; break;
     case K_MOUSERIGHT:
       pressed = true; button = 6; break;
+    case K_MOUSEMOVE:
+      button = 0; break;
     default:
       return false;
     }

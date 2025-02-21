@@ -34,8 +34,6 @@ M.minimum_language_version = vim._ts_get_minimum_language_version()
 function M._create_parser(bufnr, lang, opts)
   bufnr = vim._resolve_bufnr(bufnr)
 
-  vim.fn.bufload(bufnr)
-
   local self = LanguageTree.new(bufnr, lang, opts)
 
   local function bytes_cb(_, ...)
@@ -102,6 +100,9 @@ function M.get_parser(bufnr, lang, opts)
       return nil, err_msg
     end
   elseif parsers[bufnr] == nil or parsers[bufnr]:lang() ~= lang then
+    if not api.nvim_buf_is_loaded(bufnr) then
+      error(('Buffer %s must be loaded to create parser'):format(bufnr))
+    end
     local parser = vim.F.npcall(M._create_parser, bufnr, lang, opts)
     if not parser then
       local err_msg =
@@ -149,7 +150,7 @@ end
 
 --- Returns the node's range or an unpacked range table
 ---
----@param node_or_range (TSNode | table) Node or table of positions
+---@param node_or_range TSNode|Range4 Node or table of positions
 ---
 ---@return integer start_row
 ---@return integer start_col
@@ -157,7 +158,8 @@ end
 ---@return integer end_col
 function M.get_node_range(node_or_range)
   if type(node_or_range) == 'table' then
-    return unpack(node_or_range)
+    --- @cast node_or_range -TSNode LuaLS bug
+    return M._range.unpack4(node_or_range)
   else
     return node_or_range:range(false)
   end
@@ -238,7 +240,9 @@ function M.node_contains(node, range)
   -- allow a table so nodes can be mocked
   vim.validate('node', node, { 'userdata', 'table' })
   vim.validate('range', range, M._range.validate, 'integer list with 4 or 6 elements')
-  return M._range.contains({ node:range() }, range)
+  --- @diagnostic disable-next-line: missing-fields LuaLS bug
+  local nrange = { node:range() } --- @type Range4
+  return M._range.contains(nrange, range)
 end
 
 --- Returns a list of highlight captures at the given position
@@ -412,6 +416,14 @@ end
 ---@param lang string? Language of the parser (default: from buffer filetype)
 function M.start(bufnr, lang)
   bufnr = vim._resolve_bufnr(bufnr)
+  -- Ensure buffer is loaded. `:edit` over `bufload()` to show swapfile prompt.
+  if not api.nvim_buf_is_loaded(bufnr) then
+    if api.nvim_buf_get_name(bufnr) ~= '' then
+      pcall(api.nvim_buf_call, bufnr, vim.cmd.edit)
+    else
+      vim.fn.bufload(bufnr)
+    end
+  end
   local parser = assert(M.get_parser(bufnr, lang, { error = false }))
   M.highlighter.new(parser)
 end

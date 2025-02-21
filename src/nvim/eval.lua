@@ -2481,7 +2481,8 @@ M.funcs = {
       When {expr3} is omitted then "force" is assumed.
 
       {expr1} is changed when {expr2} is not empty.  If necessary
-      make a copy of {expr1} first.
+      make a copy of {expr1} first or use |extendnew()| to return a
+      new List/Dictionary.
       {expr2} remains unchanged.
       When {expr1} is locked and {expr2} is not empty the operation
       fails.
@@ -3471,15 +3472,17 @@ M.funcs = {
     signature = 'getchangelist([{buf}])',
   },
   getchar = {
-    args = { 0, 1 },
+    args = { 0, 2 },
     desc = [=[
       Get a single character from the user or input stream.
-      If {expr} is omitted, wait until a character is available.
+      If {expr} is omitted or is -1, wait until a character is
+      	available.
       If {expr} is 0, only get a character when one is available.
       	Return zero otherwise.
       If {expr} is 1, only check if a character is available, it is
       	not consumed.  Return zero if no character available.
-      If you prefer always getting a string use |getcharstr()|.
+      If you prefer always getting a string use |getcharstr()|, or
+      specify |FALSE| as "number" in {opts}.
 
       Without {expr} and when {expr} is 0 a whole character or
       special key is returned.  If it is a single character, the
@@ -3489,7 +3492,8 @@ M.funcs = {
       starting with 0x80 (decimal: 128).  This is the same value as
       the String "\<Key>", e.g., "\<Left>".  The returned value is
       also a String when a modifier (shift, control, alt) was used
-      that is not included in the character.
+      that is not included in the character.  |keytrans()| can also
+      be used to convert a returned String into a readable form.
 
       When {expr} is 0 and Esc is typed, there will be a short delay
       while Vim waits to see if this is the start of an escape
@@ -3500,6 +3504,32 @@ M.funcs = {
       Use nr2char() to convert it to a String.
 
       Use getcharmod() to obtain any additional modifiers.
+
+      The optional argument {opts} is a Dict and supports the
+      following items:
+
+      	cursor		A String specifying cursor behavior
+      			when waiting for a character.
+      			"hide": hide the cursor.
+      			"keep": keep current cursor unchanged.
+      			"msg": move cursor to message area.
+      			(default: automagically decide
+      			between "keep" and "msg")
+
+      	number		If |TRUE|, return a Number when getting
+      			a single character.
+      			If |FALSE|, the return value is always
+      			converted to a String, and an empty
+      			String (instead of 0) is returned when
+      			no character is available.
+      			(default: |TRUE|)
+
+      	simplify	If |TRUE|, include modifiers in the
+      			character if possible.  E.g., return
+      			the same value for CTRL-I and <Tab>.
+      			If |FALSE|, don't include modifiers in
+      			the character.
+      			(default: |TRUE|)
 
       When the user clicks a mouse button, the mouse event will be
       returned.  The position can then be found in |v:mouse_col|,
@@ -3538,9 +3568,9 @@ M.funcs = {
       <
     ]=],
     name = 'getchar',
-    params = { { 'expr', '0|1' } },
-    returns = 'integer',
-    signature = 'getchar([{expr}])',
+    params = { { 'expr', '-1|0|1' }, { 'opts', 'table' } },
+    returns = 'integer|string',
+    signature = 'getchar([{expr} [, {opts}]])',
   },
   getcharmod = {
     desc = [=[
@@ -3613,21 +3643,13 @@ M.funcs = {
     signature = 'getcharsearch()',
   },
   getcharstr = {
-    args = { 0, 1 },
+    args = { 0, 2 },
     desc = [=[
-      Get a single character from the user or input stream as a
-      string.
-      If {expr} is omitted, wait until a character is available.
-      If {expr} is 0 or false, only get a character when one is
-      	available.  Return an empty string otherwise.
-      If {expr} is 1 or true, only check if a character is
-      	available, it is not consumed.  Return an empty string
-      	if no character is available.
-      Otherwise this works like |getchar()|, except that a number
-      result is converted to a string.
+      The same as |getchar()|, except that this always returns a
+      String, and "number" isn't allowed in {opts}.
     ]=],
     name = 'getcharstr',
-    params = { { 'expr', '0|1' } },
+    params = { { 'expr', '-1|0|1' }, { 'opts', 'table' } },
     returns = 'string',
     signature = 'getcharstr([{expr}])',
   },
@@ -5098,6 +5120,7 @@ M.funcs = {
       	fname_case	Case in file names matters (for Darwin and MS-Windows
       			this is not present).
       	gui_running	Nvim has a GUI.
+      	hurd		GNU/Hurd system.
       	iconv		Can use |iconv()| for conversion.
       	linux		Linux system.
       	mac		MacOS system.
@@ -11227,6 +11250,20 @@ M.funcs = {
     params = { { 'what', "'cache'|'config'|'config_dirs'|'data'|'data_dirs'|'log'|'run'|'state'" } },
     returns = 'string|string[]',
     signature = 'stdpath({what})',
+  },
+  stdpath__1 = {
+    args = 1,
+    fast = true,
+    name = 'stdpath',
+    params = { { 'what', "'cache'|'config'|'data'|'log'|'run'|'state'" } },
+    returns = 'string',
+  },
+  stdpath__2 = {
+    args = 1,
+    fast = true,
+    name = 'stdpath',
+    params = { { 'what', "'config_dirs'|'data_dirs'" } },
+    returns = 'string[]',
   },
   str2float = {
     args = 1,

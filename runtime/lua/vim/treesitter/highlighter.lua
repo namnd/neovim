@@ -160,7 +160,10 @@ function TSHighlighter:destroy()
     vim.bo[self.bufnr].spelloptions = self.orig_spelloptions
     vim.b[self.bufnr].ts_highlight = nil
     if vim.g.syntax_on == 1 then
-      api.nvim_exec_autocmds('FileType', { group = 'syntaxset', buffer = self.bufnr })
+      api.nvim_exec_autocmds(
+        'FileType',
+        { group = 'syntaxset', buffer = self.bufnr, modeline = false }
+      )
     end
   end
 end
@@ -229,7 +232,12 @@ end
 ---@return vim.treesitter.highlighter.Query
 function TSHighlighter:get_query(lang)
   if not self._queries[lang] then
-    self._queries[lang] = TSHighlighterQuery.new(lang)
+    local success, result = pcall(TSHighlighterQuery.new, lang)
+    if not success then
+      self:destroy()
+      error(result)
+    end
+    self._queries[lang] = result
   end
 
   return self._queries[lang]

@@ -31,7 +31,7 @@ target_link_libraries(main_lib INTERFACE ${LUV_LIBRARY})
 find_package(Iconv REQUIRED)
 find_package(Libuv 1.28.0 REQUIRED)
 find_package(Lpeg REQUIRED)
-find_package(Treesitter 0.24.0 REQUIRED)
+find_package(Treesitter 0.25.0 REQUIRED)
 find_package(Unibilium 2.0 REQUIRED)
 find_package(UTF8proc REQUIRED)
 
@@ -49,7 +49,7 @@ if(ENABLE_LIBINTL)
 endif()
 
 if(ENABLE_WASMTIME)
-  find_package(Wasmtime 25.0.3 EXACT REQUIRED)
+  find_package(Wasmtime 29.0.1 EXACT REQUIRED)
   target_link_libraries(main_lib INTERFACE wasmtime)
   target_compile_definitions(nvim_bin PRIVATE HAVE_WASMTIME)
 endif()
@@ -770,8 +770,6 @@ if(WIN32)
   set(EXTERNAL_BLOBS_SCRIPT
     "file(MAKE_DIRECTORY \"${PROJECT_BINARY_DIR}/windows_runtime_deps/platforms\")")
   foreach(DEP_FILE IN ITEMS
-      cat.exe
-      tee.exe
       win32yank.exe
       xxd.exe)
   get_filename_component(DEP_FILE_DIR ${DEP_FILE} DIRECTORY)
