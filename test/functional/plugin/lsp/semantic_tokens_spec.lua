@@ -132,6 +132,53 @@ describe('semantic token highlighting', function()
       }
     end)
 
+    it('buffer is highlighted with multiline tokens', function()
+      insert(text)
+      exec_lua(function()
+        _G.server2 = _G._create_server({
+          capabilities = {
+            semanticTokensProvider = {
+              full = { delta = true },
+              legend = vim.fn.json_decode(legend),
+            },
+          },
+          handlers = {
+            ['textDocument/semanticTokens/full'] = function(_, _, callback)
+              callback(nil, {
+                data = { 5, 0, 82, 0, 0 },
+                resultId = 1,
+              })
+            end,
+          },
+        })
+      end, legend, response, edit_response)
+      exec_lua(function()
+        local bufnr = vim.api.nvim_get_current_buf()
+        vim.api.nvim_win_set_buf(0, bufnr)
+        vim.bo[bufnr].filetype = 'some-filetype'
+        vim.lsp.start({ name = 'dummy', cmd = _G.server2.cmd })
+      end)
+
+      screen:expect {
+        grid = [[
+        #include <iostream>                     |
+                                                |
+        int main()                              |
+        {                                       |
+            int x;                              |
+        {2:#ifdef __cplusplus}                      |
+        {2:    std::cout << x << "\n";}             |
+        {2:#else}                                   |
+        {2:    printf("%d\n", x);}                  |
+        {2:#endif}                                  |
+        }                                       |
+        ^}                                       |
+        {1:~                                       }|*3
+                                                |
+      ]],
+      }
+    end)
+
     it('use LspTokenUpdate and highlight_token', function()
       insert(text)
       exec_lua(function()
@@ -600,6 +647,39 @@ describe('semantic token highlighting', function()
       }
     end)
 
+    it('resets active request after receiving error responses from the server', function()
+      local error = { code = -32801, message = 'Content modified' }
+      exec_lua(function()
+        _G.server2 = _G._create_server({
+          capabilities = {
+            semanticTokensProvider = {
+              full = { delta = false },
+            },
+          },
+          handlers = {
+            -- There is same logic for handling nil responses and error responses,
+            -- so keep responses not nil.
+            --
+            -- if an error response was not be handled, this test will hang on here.
+            --- @param callback function
+            ['textDocument/semanticTokens/full'] = function(_, _, callback)
+              callback(error, vim.fn.json_decode(response))
+            end,
+            --- @param callback function
+            ['textDocument/semanticTokens/full/delta'] = function(_, _, callback)
+              callback(error, vim.fn.json_decode(response))
+            end,
+          },
+        })
+        return vim.lsp.start({ name = 'dummy', cmd = _G.server2.cmd })
+      end)
+      screen:expect([[
+        ^                                        |
+        {1:~                                       }|*14
+                                                |
+      ]])
+    end)
+
     it('does not send delta requests if not supported by server', function()
       insert(text)
       exec_lua(function()
@@ -694,6 +774,7 @@ describe('semantic token highlighting', function()
         expected = {
           {
             line = 0,
+            end_line = 0,
             modifiers = { declaration = true, globalScope = true },
             start_col = 6,
             end_col = 9,
@@ -735,6 +816,7 @@ int main()
         expected = {
           { -- main
             line = 1,
+            end_line = 1,
             modifiers = { declaration = true, globalScope = true },
             start_col = 4,
             end_col = 8,
@@ -743,6 +825,7 @@ int main()
           },
           { --  __cplusplus
             line = 3,
+            end_line = 3,
             modifiers = { globalScope = true },
             start_col = 9,
             end_col = 20,
@@ -751,6 +834,7 @@ int main()
           },
           { -- x
             line = 4,
+            end_line = 4,
             modifiers = { declaration = true, readonly = true, functionScope = true },
             start_col = 12,
             end_col = 13,
@@ -759,6 +843,7 @@ int main()
           },
           { -- std
             line = 5,
+            end_line = 5,
             modifiers = { defaultLibrary = true, globalScope = true },
             start_col = 2,
             end_col = 5,
@@ -767,6 +852,7 @@ int main()
           },
           { -- cout
             line = 5,
+            end_line = 5,
             modifiers = { defaultLibrary = true, globalScope = true },
             start_col = 7,
             end_col = 11,
@@ -775,6 +861,7 @@ int main()
           },
           { -- x
             line = 5,
+            end_line = 5,
             modifiers = { readonly = true, functionScope = true },
             start_col = 15,
             end_col = 16,
@@ -783,6 +870,7 @@ int main()
           },
           { -- std
             line = 5,
+            end_line = 5,
             modifiers = { defaultLibrary = true, globalScope = true },
             start_col = 20,
             end_col = 23,
@@ -791,6 +879,7 @@ int main()
           },
           { -- endl
             line = 5,
+            end_line = 5,
             modifiers = { defaultLibrary = true, globalScope = true },
             start_col = 25,
             end_col = 29,
@@ -799,6 +888,7 @@ int main()
           },
           { -- #else comment #endif
             line = 6,
+            end_line = 6,
             modifiers = {},
             start_col = 0,
             end_col = 7,
@@ -807,6 +897,7 @@ int main()
           },
           {
             line = 7,
+            end_line = 7,
             modifiers = {},
             start_col = 0,
             end_col = 11,
@@ -815,6 +906,7 @@ int main()
           },
           {
             line = 8,
+            end_line = 8,
             modifiers = {},
             start_col = 0,
             end_col = 8,
@@ -858,6 +950,7 @@ b = "as"]],
         expected = {
           {
             line = 0,
+            end_line = 0,
             modifiers = {},
             start_col = 0,
             end_col = 10,
@@ -866,6 +959,7 @@ b = "as"]],
           },
           {
             line = 1,
+            end_line = 1,
             modifiers = { declaration = true }, -- a
             start_col = 6,
             end_col = 7,
@@ -874,6 +968,7 @@ b = "as"]],
           },
           {
             line = 2,
+            end_line = 2,
             modifiers = { static = true }, -- b (global)
             start_col = 0,
             end_col = 1,
@@ -917,6 +1012,7 @@ b = "as"]],
         expected = {
           {
             line = 0,
+            end_line = 0,
             modifiers = {},
             start_col = 0,
             end_col = 3, -- pub
@@ -925,6 +1021,7 @@ b = "as"]],
           },
           {
             line = 0,
+            end_line = 0,
             modifiers = {},
             start_col = 4,
             end_col = 6, -- fn
@@ -933,6 +1030,7 @@ b = "as"]],
           },
           {
             line = 0,
+            end_line = 0,
             modifiers = { declaration = true, public = true },
             start_col = 7,
             end_col = 11, -- main
@@ -941,6 +1039,7 @@ b = "as"]],
           },
           {
             line = 0,
+            end_line = 0,
             modifiers = {},
             start_col = 11,
             end_col = 12,
@@ -949,6 +1048,7 @@ b = "as"]],
           },
           {
             line = 0,
+            end_line = 0,
             modifiers = {},
             start_col = 12,
             end_col = 13,
@@ -957,6 +1057,7 @@ b = "as"]],
           },
           {
             line = 0,
+            end_line = 0,
             modifiers = {},
             start_col = 14,
             end_col = 15,
@@ -965,6 +1066,7 @@ b = "as"]],
           },
           {
             line = 1,
+            end_line = 1,
             modifiers = {},
             start_col = 4,
             end_col = 12,
@@ -973,6 +1075,7 @@ b = "as"]],
           },
           {
             line = 1,
+            end_line = 1,
             modifiers = {},
             start_col = 12,
             end_col = 13,
@@ -981,6 +1084,7 @@ b = "as"]],
           },
           {
             line = 1,
+            end_line = 1,
             modifiers = {},
             start_col = 13,
             end_col = 27,
@@ -989,6 +1093,7 @@ b = "as"]],
           },
           {
             line = 1,
+            end_line = 1,
             modifiers = {},
             start_col = 27,
             end_col = 28,
@@ -997,6 +1102,7 @@ b = "as"]],
           },
           {
             line = 1,
+            end_line = 1,
             modifiers = {},
             start_col = 28,
             end_col = 29,
@@ -1005,6 +1111,7 @@ b = "as"]],
           },
           {
             line = 2,
+            end_line = 2,
             modifiers = { controlFlow = true },
             start_col = 4,
             end_col = 9, -- break
@@ -1013,6 +1120,7 @@ b = "as"]],
           },
           {
             line = 2,
+            end_line = 2,
             modifiers = {},
             start_col = 10,
             end_col = 14, -- rust
@@ -1021,6 +1129,7 @@ b = "as"]],
           },
           {
             line = 2,
+            end_line = 2,
             modifiers = {},
             start_col = 14,
             end_col = 15,
@@ -1029,6 +1138,7 @@ b = "as"]],
           },
           {
             line = 3,
+            end_line = 3,
             modifiers = { documentation = true },
             start_col = 4,
             end_col = 13,
@@ -1037,6 +1147,7 @@ b = "as"]],
           },
           {
             line = 4,
+            end_line = 4,
             modifiers = {},
             start_col = 0,
             end_col = 1,
@@ -1118,6 +1229,7 @@ b = "as"]],
               globalScope = true,
             },
             start_col = 6,
+            end_line = 0,
             end_col = 9,
             type = 'variable',
             marked = true,
@@ -1131,6 +1243,7 @@ b = "as"]],
               globalScope = true,
             },
             start_col = 6,
+            end_line = 1,
             end_col = 9,
             type = 'variable',
             marked = true,
@@ -1201,6 +1314,7 @@ int main()
         expected1 = {
           {
             line = 2,
+            end_line = 2,
             start_col = 4,
             end_col = 8,
             modifiers = { declaration = true, globalScope = true },
@@ -1209,6 +1323,7 @@ int main()
           },
           {
             line = 4,
+            end_line = 4,
             start_col = 8,
             end_col = 9,
             modifiers = { declaration = true, functionScope = true },
@@ -1217,6 +1332,7 @@ int main()
           },
           {
             line = 5,
+            end_line = 5,
             start_col = 7,
             end_col = 18,
             modifiers = { globalScope = true },
@@ -1225,6 +1341,7 @@ int main()
           },
           {
             line = 6,
+            end_line = 6,
             start_col = 4,
             end_col = 7,
             modifiers = { defaultLibrary = true, globalScope = true },
@@ -1233,6 +1350,7 @@ int main()
           },
           {
             line = 6,
+            end_line = 6,
             start_col = 9,
             end_col = 13,
             modifiers = { defaultLibrary = true, globalScope = true },
@@ -1241,6 +1359,7 @@ int main()
           },
           {
             line = 6,
+            end_line = 6,
             start_col = 17,
             end_col = 18,
             marked = true,
@@ -1249,6 +1368,7 @@ int main()
           },
           {
             line = 7,
+            end_line = 7,
             start_col = 0,
             end_col = 5,
             marked = true,
@@ -1257,6 +1377,7 @@ int main()
           },
           {
             line = 8,
+            end_line = 8,
             end_col = 22,
             modifiers = {},
             start_col = 0,
@@ -1265,6 +1386,7 @@ int main()
           },
           {
             line = 9,
+            end_line = 9,
             start_col = 0,
             end_col = 6,
             modifiers = {},
@@ -1275,6 +1397,7 @@ int main()
         expected2 = {
           {
             line = 2,
+            end_line = 2,
             start_col = 4,
             end_col = 8,
             modifiers = { declaration = true, globalScope = true },
@@ -1283,6 +1406,7 @@ int main()
           },
           {
             line = 4,
+            end_line = 4,
             start_col = 8,
             end_col = 9,
             modifiers = { declaration = true, globalScope = true },
@@ -1291,6 +1415,7 @@ int main()
           },
           {
             line = 5,
+            end_line = 5,
             end_col = 12,
             start_col = 11,
             modifiers = { declaration = true, functionScope = true },
@@ -1299,6 +1424,7 @@ int main()
           },
           {
             line = 6,
+            end_line = 6,
             start_col = 7,
             end_col = 18,
             modifiers = { globalScope = true },
@@ -1307,6 +1433,7 @@ int main()
           },
           {
             line = 7,
+            end_line = 7,
             start_col = 4,
             end_col = 7,
             modifiers = { defaultLibrary = true, globalScope = true },
@@ -1315,6 +1442,7 @@ int main()
           },
           {
             line = 7,
+            end_line = 7,
             start_col = 9,
             end_col = 13,
             modifiers = { defaultLibrary = true, globalScope = true },
@@ -1323,6 +1451,7 @@ int main()
           },
           {
             line = 7,
+            end_line = 7,
             start_col = 17,
             end_col = 18,
             marked = true,
@@ -1331,6 +1460,7 @@ int main()
           },
           {
             line = 8,
+            end_line = 8,
             start_col = 0,
             end_col = 5,
             marked = true,
@@ -1339,6 +1469,7 @@ int main()
           },
           {
             line = 9,
+            end_line = 9,
             end_col = 22,
             modifiers = {},
             start_col = 0,
@@ -1347,6 +1478,7 @@ int main()
           },
           {
             line = 10,
+            end_line = 10,
             start_col = 0,
             end_col = 6,
             modifiers = {},
@@ -1411,6 +1543,7 @@ int main()
         expected1 = {
           {
             line = 0,
+            end_line = 0,
             modifiers = {
               declaration = true,
             },

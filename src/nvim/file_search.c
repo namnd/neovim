@@ -1449,11 +1449,10 @@ char *find_file_in_path_option(char *ptr, size_t len, int options, int first, ch
     // copy file name into NameBuff, expanding environment variables
     char save_char = ptr[len];
     ptr[len] = NUL;
-    expand_env_esc(ptr, NameBuff, MAXPATHL, false, true, NULL);
+    file_to_findlen = expand_env_esc(ptr, NameBuff, MAXPATHL, false, true, NULL);
     ptr[len] = save_char;
 
     xfree(*file_to_find);
-    file_to_findlen = strlen(NameBuff);
     *file_to_find = xmemdupz(NameBuff, file_to_findlen);
     if (options & FNAME_UNESC) {
       // Change all "\ " to " ".
@@ -1747,7 +1746,7 @@ static char *eval_includeexpr(const char *const ptr, const size_t len)
 {
   const sctx_T save_sctx = current_sctx;
   set_vim_var_string(VV_FNAME, ptr, (ptrdiff_t)len);
-  current_sctx = curbuf->b_p_script_ctx[kBufOptIncludeexpr].script_ctx;
+  current_sctx = curbuf->b_p_script_ctx[kBufOptIncludeexpr];
 
   char *res = eval_to_string_safe(curbuf->b_p_inex,
                                   was_set_insecurely(curwin, kOptIncludeexpr, OPT_LOCAL),

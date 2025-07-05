@@ -95,8 +95,7 @@ describe('Diff mode screen with 3 diffs open', function()
       {7:  }{8:  9 }{4:    BBB                    }│{7:  }{8:  9 }{4:    BBB                   }│{7:  }{8:    }{23:---------------------------}|
       {7:  }{8: 10 }{4:    BBB                    }│{7:  }{8: 10 }{4:    BBB                   }│{7:  }{8:    }{23:---------------------------}|
       {7:  }{8: 11 }{4:>>>>>>> branch1            }│{7:  }{8: 11 }{4:>>>>>>> branch1           }│{7:  }{8:    }{23:---------------------------}|
-      {7:  }{8: 12 }                           │{7:  }{8: 12 }                          │{7:  }{8:  6 }                           |
-      {1:~                                }│{1:~                               }│{1:~                                }|*2
+      {1:~                                }│{1:~                               }│{1:~                                }|*3
       {3:<-functional-diff-screen-1.3 [+]  }{2:<est-functional-diff-screen-1.2  Xtest-functional-diff-screen-1   }|
       :2,6diffget screen-1.2                                                                              |
       ]])
@@ -114,9 +113,8 @@ describe('Diff mode screen with 3 diffs open', function()
       {7:  }{8:  4 }{4:    }{27:BBB}{4:                    }│{7:  }{8:  6 }{4:    }{27:BBB}{4:                   }│{7:  }{8:  4 }{4:    }{27:AAA}{4:                    }|
       {7:  }{8:  5 }{4:    }{27:BBB}{4:                    }│{7:  }{8:  7 }{4:    }{27:BBB}{4:                   }│{7:  }{8:  5 }{4:    }{27:AAA}{4:                    }|
       {7:  }{8:    }{23:---------------------------}│{7:  }{8:  8 }{22:>>>>>>> branch1           }│{7:  }{8:    }{23:---------------------------}|
-      {7:  }{8:  6 }                           │{7:  }{8:  9 }                          │{7:  }{8:  6 }                           |
-      {1:~                                }│{1:~                               }│{1:~                                }|*5
-      {2:<test-functional-diff-screen-1.3  }{3:<functional-diff-screen-1.2 [+]  }{2:Xtest-functional-diff-screen-1   }|
+      {1:~                                }│{1:~                               }│{1:~                                }|*6
+      {2:Xtest-functional-diff-screen-1.3  }{3:<functional-diff-screen-1.2 [+]  }{2:Xtest-functional-diff-screen-1   }|
       :5,7diffget screen-1.3                                                                              |
       ]])
       end)
@@ -136,9 +134,8 @@ describe('Diff mode screen with 3 diffs open', function()
       {7:  }{8:  4 }    BBB                    │{7:  }{8:  9 }    BBB                   │{7:  }{8:  8 }    BBB                    |
       {7:  }{8:  5 }    BBB                    │{7:  }{8: 10 }    BBB                   │{7:  }{8:  9 }    BBB                    |
       {7:  }{8:    }{23:---------------------------}│{7:  }{8: 11 }{4:>>>>>>> branch1           }│{7:  }{8: 10 }{4:>>>>>>> branch1            }|
-      {7:  }{8:  6 }                           │{7:  }{8: 12 }                          │{7:  }{8: 11 }                           |
-      {1:~                                }│{1:~                               }│{1:~                                }|*2
-      {2:<test-functional-diff-screen-1.3  <est-functional-diff-screen-1.2  }{3:<st-functional-diff-screen-1 [+] }|
+      {1:~                                }│{1:~                               }│{1:~                                }|*3
+      {2:Xtest-functional-diff-screen-1.3  <est-functional-diff-screen-1.2  }{3:<st-functional-diff-screen-1 [+] }|
       :5,6diffget screen-1.2                                                                              |
       ]])
       end)
@@ -158,9 +155,8 @@ describe('Diff mode screen with 3 diffs open', function()
       {7:  }{8:  4 }{4:    BBB                    }│{7:  }{8:  9 }{4:    BBB                   }│{7:  }{8:    }{23:---------------------------}|
       {7:  }{8:  5 }    BBB                    │{7:  }{8: 10 }    BBB                   │{7:  }{8:  7 }    BBB                    |
       {7:  }{8:    }{23:---------------------------}│{7:  }{8: 11 }{22:>>>>>>> branch1           }│{7:  }{8:    }{23:---------------------------}|
-      {7:  }{8:  6 }                           │{7:  }{8: 12 }                          │{7:  }{8:  8 }                           |
-      {1:~                                }│{1:~                               }│{1:~                                }|*2
-      {2:<test-functional-diff-screen-1.3  }{3:<est-functional-diff-screen-1.2  }{2:<st-functional-diff-screen-1 [+] }|
+      {1:~                                }│{1:~                               }│{1:~                                }|*3
+      {2:Xtest-functional-diff-screen-1.3  }{3:<est-functional-diff-screen-1.2  }{2:<st-functional-diff-screen-1 [+] }|
       :6,8diffput screen-1                                                                                |
       ]])
       end)
@@ -179,9 +175,8 @@ describe('Diff mode screen with 3 diffs open', function()
       {7:  }{8:  4 }    BBB                    │{7:  }{8:  9 }    BBB                   │{7:  }{8:  8 }    BBB                    |
       {7:  }{8:  5 }    BBB                    │{7:  }{8: 10 }    BBB                   │{7:  }{8:  9 }    BBB                    |
       {7:  }{8:    }{23:---------------------------}│{7:  }{8: 11 }{4:>>>>>>> branch1           }│{7:  }{8: 10 }{4:>>>>>>> branch1            }|
-      {7:  }{8:  6 }                           │{7:  }{8: 12 }                          │{7:  }{8: 11 }                           |
-      {1:~                                }│{1:~                               }│{1:~                                }|*2
-      {2:<test-functional-diff-screen-1.3  }{3:<est-functional-diff-screen-1.2  }{2:<st-functional-diff-screen-1 [+] }|
+      {1:~                                }│{1:~                               }│{1:~                                }|*3
+      {2:Xtest-functional-diff-screen-1.3  }{3:<est-functional-diff-screen-1.2  }{2:<st-functional-diff-screen-1 [+] }|
       :6,11diffput screen-1                                                                               |
       ]])
       end)
@@ -276,8 +271,7 @@ something
       {7:  }{8: 14 }common line                                │{7:  }{8: 15 }common line                                 |
       {7:  }{8:    }{23:-------------------------------------------}│{7:  }{8: 16 }{22:DEF                                         }|
       {7:  }{8: 15 }something                                  │{7:  }{8: 17 }something                                   |
-      {7:  }{8: 16 }                                           │{7:  }{8: 18 }                                            |
-      {1:~                                                }│{1:~                                                 }|*6
+      {1:~                                                }│{1:~                                                 }|*7
       {3:Xtest-functional-diff-screen-1.2 [+]              }{2:Xtest-functional-diff-screen-1                    }|
       :5,9diffget                                                                                         |
       ]])
@@ -300,8 +294,7 @@ something
       {7:  }{8: 11 }common line                                │{7:  }{8: 12 }common line                                 |
       {7:  }{8:    }{23:-------------------------------------------}│{7:  }{8: 13 }{22:DEF                                         }|
       {7:  }{8: 12 }something                                  │{7:  }{8: 14 }something                                   |
-      {7:  }{8: 13 }                                           │{7:  }{8: 15 }                                            |
-      {1:~                                                }│{1:~                                                 }|*3
+      {1:~                                                }│{1:~                                                 }|*4
       {2:Xtest-functional-diff-screen-1.2                  }{3:Xtest-functional-diff-screen-1 [+]                }|
       :5,10diffget                                                                                        |
       ]])
@@ -310,20 +303,8 @@ something
       feed('2<c-w>w')
       feed(':4,17diffget<cr>')
       screen:expect([[
-      {7:  }{8:  1 }                                           │{7:  }{8:  1 }^                                            |
-      {7:  }{8:  2 }common line                                │{7:  }{8:  2 }common line                                 |
-      {7:  }{8:  3 }common line                                │{7:  }{8:  3 }common line                                 |
-      {7:  }{8:  4 }                                           │{7:  }{8:  4 }                                            |
-      {7:  }{8:  5 }ABCabc                                     │{7:  }{8:  5 }ABCabc                                      |
-      {7:  }{8:  6 }ABCabc                                     │{7:  }{8:  6 }ABCabc                                      |
-      {7:  }{8:  7 }ABCabc                                     │{7:  }{8:  7 }ABCabc                                      |
-      {7:  }{8:  8 }ABCabc                                     │{7:  }{8:  8 }ABCabc                                      |
-      {7:  }{8:  9 }common line                                │{7:  }{8:  9 }common line                                 |
-      {7:  }{8: 10 }common line                                │{7:  }{8: 10 }common line                                 |
-      {7:  }{8: 11 }common line                                │{7:  }{8: 11 }common line                                 |
-      {7:  }{8: 12 }something                                  │{7:  }{8: 12 }something                                   |
-      {7:  }{8: 13 }                                           │{7:  }{8: 13 }                                            |
-      {1:~                                                }│{1:~                                                 }|*5
+      {7:+ }{8:  1 }{13:+-- 12 lines: common line··················}│{7:+ }{8:  1 }{13:^+-- 12 lines: common line···················}|
+      {1:~                                                }│{1:~                                                 }|*17
       {2:Xtest-functional-diff-screen-1.2                  }{3:Xtest-functional-diff-screen-1 [+]                }|
       :4,17diffget                                                                                        |
       ]])
@@ -332,24 +313,8 @@ something
       feed('1<c-w>w')
       feed(':4,12diffget<cr>')
       screen:expect([[
-      {7:  }{8:  1 }^                                           │{7:  }{8:  1 }                                            |
-      {7:  }{8:  2 }common line                                │{7:  }{8:  2 }common line                                 |
-      {7:  }{8:  3 }common line                                │{7:  }{8:  3 }common line                                 |
-      {7:  }{8:  4 }                                           │{7:  }{8:  4 }                                            |
-      {7:  }{8:  5 }DEFabc                                     │{7:  }{8:  5 }DEFabc                                      |
-      {7:  }{8:  6 }xyz                                        │{7:  }{8:  6 }xyz                                         |
-      {7:  }{8:  7 }xyz                                        │{7:  }{8:  7 }xyz                                         |
-      {7:  }{8:  8 }xyz                                        │{7:  }{8:  8 }xyz                                         |
-      {7:  }{8:  9 }DEFabc                                     │{7:  }{8:  9 }DEFabc                                      |
-      {7:  }{8: 10 }DEFabc                                     │{7:  }{8: 10 }DEFabc                                      |
-      {7:  }{8: 11 }DEFabc                                     │{7:  }{8: 11 }DEFabc                                      |
-      {7:  }{8: 12 }common line                                │{7:  }{8: 12 }common line                                 |
-      {7:  }{8: 13 }common line                                │{7:  }{8: 13 }common line                                 |
-      {7:  }{8: 14 }DEF                                        │{7:  }{8: 14 }DEF                                         |
-      {7:  }{8: 15 }common line                                │{7:  }{8: 15 }common line                                 |
-      {7:  }{8: 16 }DEF                                        │{7:  }{8: 16 }DEF                                         |
-      {7:  }{8: 17 }something                                  │{7:  }{8: 17 }something                                   |
-      {7:  }{8: 18 }                                           │{7:  }{8: 18 }                                            |
+      {7:+ }{8:  1 }{13:^+-- 17 lines: common line··················}│{7:+ }{8:  1 }{13:+-- 17 lines: common line···················}|
+      {1:~                                                }│{1:~                                                 }|*17
       {3:Xtest-functional-diff-screen-1.2 [+]              }{2:Xtest-functional-diff-screen-1                    }|
       :4,12diffget                                                                                        |
       ]])
@@ -376,7 +341,7 @@ something
       {7:  }{8: 11 }common line                                │{7:  }{8: 15 }common line                                 |
       {7:  }{8:    }{23:-------------------------------------------}│{7:  }{8: 16 }{22:DEF                                         }|
       {7:  }{8: 12 }something                                  │{7:  }{8: 17 }something                                   |
-      {7:  }{8: 13 }                                           │{7:  }{8: 18 }                                            |
+      {1:~                                                }│{1:~                                                 }|
       {3:Xtest-functional-diff-screen-1.2 [+]              }{2:Xtest-functional-diff-screen-1                    }|
       :e                                                                                                  |
       ]])
@@ -403,7 +368,7 @@ something
       {7:  }{8: 11 }common line                                │{7:  }{8: 15 }common line                                 |
       {7:  }{8:    }{23:-------------------------------------------}│{7:  }{8: 16 }{22:DEF                                         }|
       {7:  }{8: 12 }something                                  │{7:  }{8: 17 }something                                   |
-      {7:  }{8: 13 }                                           │{7:  }{8: 18 }                                            |
+      {1:~                                                }│{1:~                                                 }|
       {3:Xtest-functional-diff-screen-1.2 [+]              }{2:Xtest-functional-diff-screen-1                    }|
       :e                                                                                                  |
       ]])
@@ -430,7 +395,7 @@ something
       {7:  }{8: 11 }common line                                │{7:  }{8: 15 }common line                                 |
       {7:  }{8:    }{23:-------------------------------------------}│{7:  }{8: 16 }{22:DEF                                         }|
       {7:  }{8: 12 }something                                  │{7:  }{8: 17 }something                                   |
-      {7:  }{8: 13 }                                           │{7:  }{8: 18 }                                            |
+      {1:~                                                }│{1:~                                                 }|
       {3:Xtest-functional-diff-screen-1.2 [+]              }{2:Xtest-functional-diff-screen-1                    }|
       :e                                                                                                  |
       ]])
@@ -457,7 +422,7 @@ something
       {7:  }{8: 12 }^common line                                │{7:  }{8: 15 }common line                                 |
       {7:  }{8:    }{23:-------------------------------------------}│{7:  }{8: 16 }{22:DEF                                         }|
       {7:  }{8: 13 }something                                  │{7:  }{8: 17 }something                                   |
-      {7:  }{8: 14 }                                           │{7:  }{8: 18 }                                            |
+      {1:~                                                }│{1:~                                                 }|
       {3:Xtest-functional-diff-screen-1.2 [+]              }{2:Xtest-functional-diff-screen-1                    }|
       :e                                                                                                  |
       ]])
@@ -484,7 +449,7 @@ something
       {7:  }{8: 11 }common line                                │{7:  }{8: 15 }common line                                 |
       {7:  }{8: 12 }DEF                                        │{7:  }{8: 16 }DEF                                         |
       {7:  }{8: 13 }^something                                  │{7:  }{8: 17 }something                                   |
-      {7:  }{8: 14 }                                           │{7:  }{8: 18 }                                            |
+      {1:~                                                }│{1:~                                                 }|
       {3:Xtest-functional-diff-screen-1.2 [+]              }{2:Xtest-functional-diff-screen-1                    }|
       :e                                                                                                  |
       ]])
@@ -511,7 +476,7 @@ something
       {7:  }{8: 11 }common line                                │{7:  }{8: 15 }common line                                 |
       {7:  }{8:    }{23:-------------------------------------------}│{7:  }{8: 16 }{22:DEF                                         }|
       {7:  }{8: 12 }something                                  │{7:  }{8: 17 }something                                   |
-      {7:  }{8: 13 }                                           │{7:  }{8: 18 }                                            |
+      {1:~                                                }│{1:~                                                 }|
       {3:Xtest-functional-diff-screen-1.2                  }{2:Xtest-functional-diff-screen-1 [+]                }|
       :e                                                                                                  |
       ]])
@@ -538,7 +503,7 @@ something
       {7:  }{8: 11 }common line                                │{7:  }{8: 15 }common line                                 |
       {7:  }{8:    }{23:-------------------------------------------}│{7:  }{8: 16 }{22:DEF                                         }|
       {7:  }{8: 12 }something                                  │{7:  }{8: 17 }something                                   |
-      {7:  }{8: 13 }                                           │{7:  }{8: 18 }                                            |
+      {1:~                                                }│{1:~                                                 }|
       {3:Xtest-functional-diff-screen-1.2                  }{2:Xtest-functional-diff-screen-1 [+]                }|
       :e                                                                                                  |
       ]])
@@ -565,7 +530,7 @@ something
       {7:  }{8: 11 }common line                                │{7:  }{8: 15 }common line                                 |
       {7:  }{8:    }{23:-------------------------------------------}│{7:  }{8: 16 }{22:DEF                                         }|
       {7:  }{8: 12 }something                                  │{7:  }{8: 17 }something                                   |
-      {7:  }{8: 13 }                                           │{7:  }{8: 18 }                                            |
+      {1:~                                                }│{1:~                                                 }|
       {3:Xtest-functional-diff-screen-1.2                  }{2:Xtest-functional-diff-screen-1 [+]                }|
       :e                                                                                                  |
       ]])
@@ -591,7 +556,7 @@ something
       {7:  }{8: 11 }^common line                                │{7:  }{8: 14 }common line                                 |
       {7:  }{8:    }{23:-------------------------------------------}│{7:  }{8: 15 }{22:DEF                                         }|
       {7:  }{8: 12 }something                                  │{7:  }{8: 16 }something                                   |
-      {7:  }{8: 13 }                                           │{7:  }{8: 17 }                                            |
+      {1:~                                                }│{1:~                                                 }|
       {1:~                                                }│{1:~                                                 }|
       {3:Xtest-functional-diff-screen-1.2                  }{2:Xtest-functional-diff-screen-1 [+]                }|
       :e                                                                                                  |
@@ -618,7 +583,7 @@ something
       {7:  }{8:    }{23:-------------------------------------------}│{7:  }{8: 14 }{22:DEF                                         }|
       {7:  }{8: 11 }common line                                │{7:  }{8: 15 }common line                                 |
       {7:  }{8: 12 }^something                                  │{7:  }{8: 16 }something                                   |
-      {7:  }{8: 13 }                                           │{7:  }{8: 17 }                                            |
+      {1:~                                                }│{1:~                                                 }|
       {1:~                                                }│{1:~                                                 }|
       {3:Xtest-functional-diff-screen-1.2                  }{2:Xtest-functional-diff-screen-1 [+]                }|
       :e                                                                                                  |
@@ -646,7 +611,7 @@ something
       {7:  }{8: 14 }common line                                │{7:  }{8: 15 }common line                                 |
       {7:  }{8:    }{23:-------------------------------------------}│{7:  }{8: 16 }{22:DEF                                         }|
       {7:  }{8: 15 }something                                  │{7:  }{8: 17 }something                                   |
-      {7:  }{8: 16 }                                           │{7:  }{8: 18 }                                            |
+      {1:~                                                }│{1:~                                                 }|
       {2:Xtest-functional-diff-screen-1.2 [+]              }{3:Xtest-functional-diff-screen-1                    }|
       :e                                                                                                  |
       ]])
@@ -673,7 +638,7 @@ something
       {7:  }{8: 14 }common line                                │{7:  }{8: 15 }common line                                 |
       {7:  }{8:    }{23:-------------------------------------------}│{7:  }{8: 16 }{22:DEF                                         }|
       {7:  }{8: 15 }something                                  │{7:  }{8: 17 }something                                   |
-      {7:  }{8: 16 }                                           │{7:  }{8: 18 }                                            |
+      {1:~                                                }│{1:~                                                 }|
       {2:Xtest-functional-diff-screen-1.2 [+]              }{3:Xtest-functional-diff-screen-1                    }|
       :e                                                                                                  |
       ]])
@@ -700,7 +665,7 @@ something
       {7:  }{8: 11 }common line                                │{7:  }{8: 15 }common line                                 |
       {7:  }{8:    }{23:-------------------------------------------}│{7:  }{8: 16 }{22:DEF                                         }|
       {7:  }{8: 12 }something                                  │{7:  }{8: 17 }something                                   |
-      {7:  }{8: 13 }                                           │{7:  }{8: 18 }                                            |
+      {1:~                                                }│{1:~                                                 }|
       {2:Xtest-functional-diff-screen-1.2 [+]              }{3:Xtest-functional-diff-screen-1                    }|
       :e                                                                                                  |
       ]])
@@ -727,7 +692,7 @@ something
       {7:  }{8: 11 }common line                                │{7:  }{8: 15 }common line                                 |
       {7:  }{8: 12 }DEF                                        │{7:  }{8: 16 }DEF                                         |
       {7:  }{8: 13 }something                                  │{7:  }{8: 17 }^something                                   |
-      {7:  }{8: 14 }                                           │{7:  }{8: 18 }                                            |
+      {1:~                                                }│{1:~                                                 }|
       {2:Xtest-functional-diff-screen-1.2 [+]              }{3:Xtest-functional-diff-screen-1                    }|
       :e                                                                                                  |
       ]])
@@ -757,8 +722,7 @@ d
       {7:  }{8:  2 }{4:abc d                                      }│{7:  }{8:  1 }{27:// }{4:abc d                                    }|
       {7:  }{8:  3 }{4:d                                          }│{7:  }{8:  2 }{27:// }{4:d                                        }|
       {7:  }{8:    }{23:-------------------------------------------}│{7:  }{8:  3 }{22:// d                                        }|
-      {7:  }{8:  4 }                                           │{7:  }{8:  4 }                                            |
-      {1:~                                                }│{1:~                                                 }|*13
+      {1:~                                                }│{1:~                                                 }|*14
       {3:Xtest-functional-diff-screen-1.2                  }{2:Xtest-functional-diff-screen-1                    }|
       :e                                                                                                  |
       ]])
@@ -794,8 +758,7 @@ void testFunction () {
       {7:  }{8:  3 }{4:  }{27:// }{4:}                                     }│{7:  }{8:  4 }{4:    }                                       }|
       {7:  }{8:    }{23:-------------------------------------------}│{7:  }{8:  5 }{22:  }                                         }|
       {7:  }{8:  4 }}                                          │{7:  }{8:  6 }}                                           |
-      {7:  }{8:  5 }                                           │{7:  }{8:  7 }                                            |
-      {1:~                                                }│{1:~                                                 }|*11
+      {1:~                                                }│{1:~                                                 }|*12
       {3:Xtest-functional-diff-screen-1.2                  }{2:Xtest-functional-diff-screen-1                    }|
       :e                                                                                                  |
       ]])
@@ -834,8 +797,7 @@ void testFunction () {
       {7:  }{8:  6 }{22:?B                                         }│{7:  }{8:    }{23:--------------------------------------------}|
       {7:  }{8:  7 }{22:?B                                         }│{7:  }{8:    }{23:--------------------------------------------}|
       {7:  }{8:  8 }{22:?C                                         }│{7:  }{8:    }{23:--------------------------------------------}|
-      {7:  }{8:  9 }                                           │{7:  }{8:  4 }                                            |
-      {1:~                                                }│{1:~                                                 }|*9
+      {1:~                                                }│{1:~                                                 }|*10
       {3:Xtest-functional-diff-screen-1.2                  }{2:Xtest-functional-diff-screen-1                    }|
       :e                                                                                                  |
       ]])
@@ -874,8 +836,7 @@ void testFunction () {
       {7:  }{8:  6 }{27:?}{4:B                                         }│{7:  }{8:  2 }{27:!}{4:B                                          }|
       {7:  }{8:  7 }{27:?}{4:C                                         }│{7:  }{8:  3 }{27:!}{4:C                                          }|
       {7:  }{8:  8 }{22:?C                                         }│{7:  }{8:    }{23:--------------------------------------------}|
-      {7:  }{8:  9 }                                           │{7:  }{8:  4 }                                            |
-      {1:~                                                }│{1:~                                                 }|*9
+      {1:~                                                }│{1:~                                                 }|*10
       {3:Xtest-functional-diff-screen-1.2                  }{2:Xtest-functional-diff-screen-1                    }|
       :e                                                                                                  |
       ]])
@@ -980,24 +941,8 @@ something
       feed('2<c-w>w')
       feed(':1,12diffget<cr>')
       screen:expect([[
-      {7:  }{8:  1 }common line                                │{7:  }{8:  1 }^common line                                 |
-      {7:  }{8:  2 }DEF                                        │{7:  }{8:  2 }DEF                                         |
-      {7:  }{8:  3 }GHI                                        │{7:  }{8:  3 }GHI                                         |
-      {7:  }{8:  4 }something                                  │{7:  }{8:  4 }something                                   |
-      {7:  }{8:  5 }                                           │{7:  }{8:  5 }                                            |
-      {7:  }{8:  6 }aDEFabc                                    │{7:  }{8:  6 }aDEFabc                                     |
-      {7:  }{8:  7 }xyz                                        │{7:  }{8:  7 }xyz                                         |
-      {7:  }{8:  8 }xyz                                        │{7:  }{8:  8 }xyz                                         |
-      {7:  }{8:  9 }xyz                                        │{7:  }{8:  9 }xyz                                         |
-      {7:  }{8: 10 }aDEFabc                                    │{7:  }{8: 10 }aDEFabc                                     |
-      {7:  }{8: 11 }aDEFabc                                    │{7:  }{8: 11 }aDEFabc                                     |
-      {7:  }{8: 12 }aDEFabc                                    │{7:  }{8: 12 }aDEFabc                                     |
-      {7:  }{8: 13 }common line                                │{7:  }{8: 13 }common line                                 |
-      {7:  }{8: 14 }DEF                                        │{7:  }{8: 14 }DEF                                         |
-      {7:  }{8: 15 }GHI                                        │{7:  }{8: 15 }GHI                                         |
-      {7:  }{8: 16 }something else                             │{7:  }{8: 16 }something else                              |
-      {7:  }{8: 17 }common line                                │{7:  }{8: 17 }common line                                 |
-      {7:  }{8: 18 }something                                  │{7:  }{8: 18 }something                                   |
+      {7:+ }{8:  1 }{13:+-- 18 lines: common line··················}│{7:+ }{8:  1 }{13:^+-- 18 lines: common line···················}|
+      {1:~                                                }│{1:~                                                 }|*17
       {2:Xtest-functional-diff-screen-1.2                  }{3:Xtest-functional-diff-screen-1 [+]                }|
       :1,12diffget                                                                                        |
       ]])
@@ -1006,19 +951,8 @@ something
       feed('1<c-w>w')
       feed(':1,19diffget<cr>')
       screen:expect([[
-      {7:  }{8:  1 }^common line                                │{7:  }{8:  1 }common line                                 |
-      {7:  }{8:  2 }HIL                                        │{7:  }{8:  2 }HIL                                         |
-      {7:  }{8:  3 }                                           │{7:  }{8:  3 }                                            |
-      {7:  }{8:  4 }aABCabc                                    │{7:  }{8:  4 }aABCabc                                     |
-      {7:  }{8:  5 }aABCabc                                    │{7:  }{8:  5 }aABCabc                                     |
-      {7:  }{8:  6 }aABCabc                                    │{7:  }{8:  6 }aABCabc                                     |
-      {7:  }{8:  7 }aABCabc                                    │{7:  }{8:  7 }aABCabc                                     |
-      {7:  }{8:  8 }common line                                │{7:  }{8:  8 }common line                                 |
-      {7:  }{8:  9 }HIL                                        │{7:  }{8:  9 }HIL                                         |
-      {7:  }{8: 10 }common line                                │{7:  }{8: 10 }common line                                 |
-      {7:  }{8: 11 }something                                  │{7:  }{8: 11 }something                                   |
-      {7:  }{8: 12 }                                           │{7:  }{8: 12 }                                            |
-      {1:~                                                }│{1:~                                                 }|*6
+      {7:+ }{8:  1 }{13:^+-- 11 lines: common line··················}│{7:+ }{8:  1 }{13:+-- 11 lines: common line···················}|
+      {1:~                                                }│{1:~                                                 }|*17
       {3:Xtest-functional-diff-screen-1.2 [+]              }{2:Xtest-functional-diff-screen-1                    }|
       :1,19diffget                                                                                        |
       ]])

@@ -82,7 +82,7 @@ describe('treesitter node API', function()
     ]])
 
     exec_lua(function()
-      local parser = vim.treesitter.get_parser(0, 'c')
+      local parser = assert(vim.treesitter.get_parser(0, 'c'))
       local tree = parser:parse()[1]
       _G.root = tree:root()
       vim.treesitter.language.inspect('c')
@@ -92,7 +92,7 @@ describe('treesitter node API', function()
       end
     end)
 
-    exec_lua 'node = root:descendant_for_range(0, 11, 0, 16)'
+    exec_lua 'node = root:descendant_for_range(0, 9, 0, 14)'
     eq('int x', lua_eval('node_text(node)'))
 
     exec_lua 'node = node:next_sibling()'
@@ -204,5 +204,41 @@ describe('treesitter node API', function()
     eq('a', lua_eval('vim.treesitter.get_node_text(children_by_field[1], 0)'))
     eq('b', lua_eval('vim.treesitter.get_node_text(children_by_field[2], 0)'))
     eq('c', lua_eval('vim.treesitter.get_node_text(children_by_field[3], 0)'))
+  end)
+
+  it('node access after tree edit', function()
+    insert([[
+      function x()
+        return true
+      end
+    ]])
+    exec_lua(function()
+      local tree = vim.treesitter.get_parser(0, 'lua'):parse()[1]
+
+      -- ensure treesitter does not try to edit the tree inplace
+      tree:copy()
+
+      local node = tree:root():child(0)
+      vim.api.nvim_buf_set_lines(0, 1, 2, false, {})
+      vim.schedule(function()
+        collectgarbage()
+        local a, b, c, d = node:range()
+        _G.range = { a, b, c, d }
+      end)
+    end)
+    eq({ 0, 0, 2, 3 }, lua_eval('range'))
+  end)
+
+  it('tree:root() is idempotent', function()
+    insert([[
+      function x()
+        return true
+      end
+    ]])
+    exec_lua(function()
+      local tree = vim.treesitter.get_parser(0, 'lua'):parse()[1]
+      assert(tree:root() == tree:root())
+      assert(tree:root() == tree:root():tree():root())
+    end)
   end)
 end)

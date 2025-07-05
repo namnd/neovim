@@ -21,6 +21,7 @@ typedef struct {
   LuaRefOf(("end" _, Integer tick)) on_end;
   LuaRefOf(("hl_def" _)) _on_hl_def;
   LuaRefOf(("spell_nav" _)) _on_spell_nav;
+  LuaRefOf(("conceal_line" _)) _on_conceal_line;
 } Dict(set_decoration_provider);
 
 typedef struct {
@@ -53,6 +54,7 @@ typedef struct {
   HLGroupID line_hl_group;
   HLGroupID cursorline_hl_group;
   String conceal;
+  String conceal_lines;
   Boolean spell;
   Boolean ui_watched;
   Boolean undo_restore;
@@ -114,9 +116,9 @@ typedef struct {
   Float col;
   Integer width;
   Integer height;
-  String anchor;
-  String relative;
-  String split;
+  Enum("NW", "NE", "SW", "SE") anchor;
+  Enum("cursor", "editor", "laststatus", "mouse", "tabline", "win") relative;
+  Enum("left", "right", "above", "below") split;
   Window win;
   ArrayOf(Integer) bufpos;
   Boolean external;
@@ -124,15 +126,16 @@ typedef struct {
   Boolean mouse;
   Boolean vertical;
   Integer zindex;
-  Object border;
+  Union(ArrayOf(String), Enum("none", "single", "double", "rounded", "solid", "shadow")) border;
   Object title;
-  String title_pos;
+  Enum("center", "left", "right") title_pos;
   Object footer;
-  String footer_pos;
-  String style;
+  Enum("center", "left", "right") footer_pos;
+  Enum("minimal") style;
   Boolean noautocmd;
   Boolean fixed;
   Boolean hide;
+  Integer _cmdline_offset;
 } Dict(win_config);
 
 typedef struct {
@@ -227,6 +230,7 @@ typedef struct {
   Integer end_row;
   Integer start_vcol;
   Integer end_vcol;
+  Integer max_height;
 } Dict(win_text_height);
 
 typedef struct {
@@ -240,7 +244,7 @@ typedef struct {
 typedef struct {
   OptionalKeys is_set__create_autocmd_;
   Buffer buffer;
-  Object callback;
+  Union(String, LuaRefOf((DictAs(create_autocmd__callback_args) args), *Boolean)) callback;
   String command;
   String desc;
   Union(Integer, String) group;
@@ -275,15 +279,15 @@ typedef struct {
 typedef struct {
   OptionalKeys is_set__cmd_;
   String cmd;
-  Array range;
+  ArrayOf(Integer) range;
   Integer count;
   String reg;
   Boolean bang;
   ArrayOf(String) args;
-  Dict magic;
-  Dict mods;
-  Union(Integer, String) nargs;
-  String addr;
+  DictAs(cmd__magic) magic;
+  DictAs(cmd__mods) mods;
+  Union(Integer, Enum("?", "+", "*")) nargs;
+  Enum("line", "arg", "buf", "load", "win", "tab", "qf", "none", "?") addr;
   String nextcmd;
 } Dict(cmd);
 
@@ -328,8 +332,10 @@ typedef struct {
 } Dict(cmd_opts);
 
 typedef struct {
+  OptionalKeys is_set__echo_opts_;
   Boolean err;
   Boolean verbose;
+  String kind;
 } Dict(echo_opts);
 
 typedef struct {

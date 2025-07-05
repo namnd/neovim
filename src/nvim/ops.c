@@ -297,12 +297,12 @@ static int get_vts_sum(const int *vts_array, int index)
   int sum = 0;
   int i;
 
-  // Perform the summation for indeces within the actual array.
+  // Perform the summation for indices within the actual array.
   for (i = 1; i <= index && i <= vts_array[0]; i++) {
     sum += vts_array[i];
   }
 
-  // Add topstops whose indeces exceed the actual array.
+  // Add tabstops whose indices exceed the actual array.
   if (i <= index) {
     sum += vts_array[vts_array[0]] * (index - vts_array[0]);
   }
@@ -966,16 +966,23 @@ yankreg_T *copy_register(int name)
 }
 
 /// Check if the current yank register has kMTLineWise register type
-bool yank_register_mline(int regname)
+/// For valid, non-blackhole registers also provides pointer to the register
+/// structure prepared for pasting.
+///
+/// @param regname The name of the register used or 0 for the unnamed register
+/// @param reg Pointer to store yankreg_T* for the requested register. Will be
+///        set to NULL for invalid or blackhole registers.
+bool yank_register_mline(int regname, yankreg_T **reg)
 {
+  *reg = NULL;
   if (regname != 0 && !valid_yank_reg(regname, false)) {
     return false;
   }
   if (regname == '_') {  // black hole is always empty
     return false;
   }
-  yankreg_T *reg = get_yank_register(regname, YREG_PASTE);
-  return reg->y_type == kMTLineWise;
+  *reg = get_yank_register(regname, YREG_PASTE);
+  return (*reg)->y_type == kMTLineWise;
 }
 
 /// Start or stop recording into a yank register.
@@ -1322,7 +1329,7 @@ static int put_in_typebuf(char *s, bool esc, bool colon, int silent)
 /// @param literally_arg  insert literally, not as if typed
 ///
 /// @return FAIL for failure, OK otherwise
-int insert_reg(int regname, bool literally_arg)
+int insert_reg(int regname, yankreg_T *reg, bool literally_arg)
 {
   int retval = OK;
   bool allocated;
@@ -1353,12 +1360,14 @@ int insert_reg(int regname, bool literally_arg)
       xfree(arg);
     }
   } else {  // Name or number register.
-    yankreg_T *reg = get_yank_register(regname, YREG_PASTE);
+    if (reg == NULL) {
+      reg = get_yank_register(regname, YREG_PASTE);
+    }
     if (reg->y_array == NULL) {
       retval = FAIL;
     } else {
       for (size_t i = 0; i < reg->y_size; i++) {
-        if (regname == '-') {
+        if (regname == '-' && reg->y_type == kMTCharWise) {
           Direction dir = BACKWARD;
           if ((State & REPLACE_FLAG) != 0) {
             pos_T curpos;
@@ -1379,11 +1388,11 @@ int insert_reg(int regname, bool literally_arg)
           do_put(regname, NULL, dir, 1, PUT_CURSEND);
         } else {
           stuffescaped(reg->y_array[i].data, literally);
-        }
-        // Insert a newline between lines and after last line if
-        // y_type is kMTLineWise.
-        if (reg->y_type == kMTLineWise || i < reg->y_size - 1) {
-          stuffcharReadbuff('\n');
+          // Insert a newline between lines and after last line if
+          // y_type is kMTLineWise.
+          if (reg->y_type == kMTLineWise || i < reg->y_size - 1) {
+            stuffcharReadbuff('\n');
+          }
         }
       }
     }
@@ -2806,6 +2815,10 @@ static void op_yank_reg(oparg_T *oap, bool message, yankreg_T *reg, bool append)
       curbuf->b_op_start.col = 0;
       curbuf->b_op_end.col = MAXCOL;
     }
+    if (yank_type != kMTLineWise && !oap->inclusive) {
+      // Exclude the end position.
+      decl(&curbuf->b_op_end);
+    }
   }
 }
 
@@ -3623,7 +3636,7 @@ error:
       // Put the '] mark on the first byte of the last inserted character.
       // Correct the length for change in indent.
       curbuf->b_op_end.lnum = new_lnum;
-      col = (colnr_T)y_array[y_size - 1].size - lendiff;
+      col = MAX(0, (colnr_T)y_array[y_size - 1].size - lendiff);
       if (col > 1) {
         curbuf->b_op_end.col = col - 1;
         if (y_array[y_size - 1].size > 0) {
@@ -3845,7 +3858,8 @@ void ex_display(exarg_T *eap)
   }
 
   // display last inserted text
-  if ((p = get_last_insert()) != NULL
+  String insert = get_last_insert();
+  if ((p = insert.data) != NULL
       && (arg == NULL || vim_strchr(arg, '.') != NULL) && !got_int
       && !message_filtered(p)) {
     msg_puts("\n  c  \".   ");
@@ -4513,8 +4527,6 @@ void op_addsub(oparg_T *oap, linenr_T Prenum1, bool g_cmd)
 /// @return true if some character was changed.
 bool do_addsub(int op_type, pos_T *pos, int length, linenr_T Prenum1)
 {
-  char *buf1 = NULL;
-  char buf2[NUMBUFLEN];
   int pre;  // 'X' or 'x': hex; '0': octal; 'B' or 'b': bin
   static bool hexupper = false;  // 0xABC
   uvarnumber_T n;
@@ -4778,7 +4790,7 @@ bool do_addsub(int op_type, pos_T *pos, int length, linenr_T Prenum1)
     // Prepare the leading characters in buf1[].
     // When there are many leading zeros it could be very long.
     // Allocate a bit too much.
-    buf1 = xmalloc((size_t)length + NUMBUFLEN);
+    char *buf1 = xmalloc((size_t)length + NUMBUFLEN);
     ptr = buf1;
     if (negative && (!visual || was_positive)) {
       *ptr++ = '-';
@@ -4793,9 +4805,10 @@ bool do_addsub(int op_type, pos_T *pos, int length, linenr_T Prenum1)
     }
 
     // Put the number characters in buf2[].
+    char buf2[NUMBUFLEN];
+    int buf2len = 0;
     if (pre == 'b' || pre == 'B') {
       size_t bits = 0;
-      size_t i = 0;
 
       // leading zeros
       for (bits = 8 * sizeof(n); bits > 0; bits--) {
@@ -4804,21 +4817,21 @@ bool do_addsub(int op_type, pos_T *pos, int length, linenr_T Prenum1)
         }
       }
 
-      while (bits > 0 && i < NUMBUFLEN - 1) {
-        buf2[i++] = ((n >> --bits) & 0x1) ? '1' : '0';
+      while (bits > 0 && buf2len < NUMBUFLEN - 1) {
+        buf2[buf2len++] = ((n >> --bits) & 0x1) ? '1' : '0';
       }
 
-      buf2[i] = NUL;
+      buf2[buf2len] = NUL;
     } else if (pre == 0) {
-      vim_snprintf(buf2, ARRAY_SIZE(buf2), "%" PRIu64, (uint64_t)n);
+      buf2len = vim_snprintf(buf2, ARRAY_SIZE(buf2), "%" PRIu64, (uint64_t)n);
     } else if (pre == '0') {
-      vim_snprintf(buf2, ARRAY_SIZE(buf2), "%" PRIo64, (uint64_t)n);
+      buf2len = vim_snprintf(buf2, ARRAY_SIZE(buf2), "%" PRIo64, (uint64_t)n);
     } else if (hexupper) {
-      vim_snprintf(buf2, ARRAY_SIZE(buf2), "%" PRIX64, (uint64_t)n);
+      buf2len = vim_snprintf(buf2, ARRAY_SIZE(buf2), "%" PRIX64, (uint64_t)n);
     } else {
-      vim_snprintf(buf2, ARRAY_SIZE(buf2), "%" PRIx64, (uint64_t)n);
+      buf2len = vim_snprintf(buf2, ARRAY_SIZE(buf2), "%" PRIx64, (uint64_t)n);
     }
-    length -= (int)strlen(buf2);
+    length -= buf2len;
 
     // Adjust number of zeros to the new number of digits, so the
     // total length of the number remains the same.
@@ -4830,8 +4843,14 @@ bool do_addsub(int op_type, pos_T *pos, int length, linenr_T Prenum1)
       }
     }
     *ptr = NUL;
-    strcat(buf1, buf2);
-    ins_str(buf1);              // insert the new number
+    int buf1len = (int)(ptr - buf1);
+
+    STRCPY(buf1 + buf1len, buf2);
+    buf1len += buf2len;
+
+    ins_str(buf1, (size_t)buf1len);  // insert the new number
+    xfree(buf1);
+
     endpos = curwin->w_cursor;
     if (curwin->w_cursor.col) {
       curwin->w_cursor.col--;
@@ -4848,7 +4867,6 @@ bool do_addsub(int op_type, pos_T *pos, int length, linenr_T Prenum1)
   }
 
 theend:
-  xfree(buf1);
   if (visual) {
     curwin->w_cursor = save_cursor;
   } else if (did_change) {
@@ -5748,7 +5766,7 @@ static void get_op_vcol(oparg_T *oap, colnr_T redo_VIsual_vcol, bool initial)
   colnr_T end;
 
   if (VIsual_mode != Ctrl_V
-      || (!initial && oap->end.col < curwin->w_width_inner)) {
+      || (!initial && oap->end.col < curwin->w_view_width)) {
     return;
   }
 

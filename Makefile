@@ -1,4 +1,14 @@
 ifeq ($(OS),Windows_NT)
+  ifeq '$(findstring ;,$(PATH))' ';'
+    UNIX_LIKE := FALSE
+  else
+    UNIX_LIKE := TRUE
+  endif
+else
+  UNIX_LIKE := TRUE
+endif
+
+ifeq ($(UNIX_LIKE),FALSE)
   SHELL := powershell.exe
   .SHELLFLAGS := -NoProfile -NoLogo
   MKDIR := @$$null = new-item -itemtype directory -force
@@ -172,3 +182,9 @@ appimage-%:
 	bash scripts/genappimage.sh $*
 
 .PHONY: test clean distclean nvim libnvim cmake deps install appimage checkprefix benchmark $(FORMAT) $(LINT) $(TEST)
+
+.PHONY: emmylua-check
+emmylua-check:
+	-emmylua_check runtime/lua \
+		--config .luarc.json \
+		--config .emmyrc.json

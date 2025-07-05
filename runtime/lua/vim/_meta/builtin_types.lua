@@ -39,6 +39,14 @@
 --- @field pos [integer, integer, integer, integer]
 --- @field file string
 
+--- @class vim.fn.getmatches.ret.item
+--- @field id integer
+--- @field group string
+--- @field pattern? string
+--- @field priority integer
+--- @field conceal? string
+--- @field [string] [integer, integer, integer] all strings of format 'pos%d'
+
 --- @class vim.fn.getmousepos.ret
 --- @field screenrow integer
 --- @field screencol integer
@@ -184,14 +192,14 @@
 --- @field signs vim.fn.sign[]
 
 --- @class vim.fn.sign_place.dict
---- @field lnum? integer
+--- @field lnum? integer|string
 --- @field priority? integer
 
 --- @class vim.fn.sign_placelist.list.item
 --- @field buffer integer|string
 --- @field group? string
 --- @field id? integer
---- @field lnum integer
+--- @field lnum? integer|string
 --- @field name string
 --- @field priority? integer
 
@@ -259,12 +267,12 @@
 --- write.  The number is the write count.  The
 --- first write has number 1, the last one the
 --- "save_last" mentioned above.
---- @field save integer
+--- @field save? integer
 ---
 --- Alternate entry.  This is again a List of undo
 --- blocks.  Each item may again have an "alt"
 --- item.
---- @field alt vim.fn.undotree.entry[]
+--- @field alt? vim.fn.undotree.entry[]
 
 --- @class vim.fn.undotree.ret
 ---
@@ -297,3 +305,18 @@
 --- A list of dictionaries with information about
 --- undo blocks.
 --- @field entries vim.fn.undotree.entry[]
+
+--- @class vim.fn.winlayout.leaf
+--- @field [1] "leaf" Node type
+--- @field [2] integer winid
+
+--- @class vim.fn.winlayout.branch
+--- @field [1] "row" | "col" Node type
+--- @field [2] (vim.fn.winlayout.leaf|vim.fn.winlayout.branch)[] children
+
+--- @class vim.fn.winlayout.empty
+
+--- @alias vim.fn.winlayout.ret
+--- | vim.fn.winlayout.leaf
+--- | vim.fn.winlayout.branch
+--- | vim.fn.winlayout.empty

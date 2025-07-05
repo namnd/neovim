@@ -14,9 +14,10 @@ typedef kvec_t(HlMessageChunk) HlMessage;
 /// Message history for `:messages`
 typedef struct msg_hist {
   struct msg_hist *next;  ///< Next message.
-  char *msg;              ///< Message text.
+  struct msg_hist *prev;  ///< Previous message.
+  HlMessage msg;          ///< Highlighted message.
   const char *kind;       ///< Message kind (for msg_ext)
-  int hl_id;               ///< Message highlighting.
-  bool multiline;         ///< Multiline message.
-  HlMessage multihl;      ///< Multihl message.
+  bool temp;              ///< Temporary message since last command ("g<")
+  bool append;            ///< Message should be appended to previous entry, as opposed
+                          ///< to on a new line (|ui-messages|->msg_show->append).
 } MessageHistoryEntry;

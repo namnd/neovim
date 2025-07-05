@@ -30,6 +30,7 @@
 #include "nvim/message.h"
 #include "nvim/msgpack_rpc/unpacker.h"
 #include "nvim/pos_defs.h"
+#include "nvim/runtime.h"
 #include "nvim/types_defs.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
@@ -471,7 +472,7 @@ int64_t normalize_index(buf_T *buf, int64_t index, bool end_exclusive, bool *oob
 
 /// Returns a substring of a buffer line
 ///
-/// @param buf          Buffer handle
+/// @param buf          Buffer id
 /// @param lnum         Line number (1-based)
 /// @param start_col    Starting byte offset into line (0-based)
 /// @param end_col      Ending byte offset into line (0-based, exclusive)
@@ -769,14 +770,14 @@ char *api_typename(ObjectType t)
   UNREACHABLE;
 }
 
-HlMessage parse_hl_msg(Array chunks, bool is_err, Error *err)
+HlMessage parse_hl_msg(ArrayOf(Tuple(String, *HLGroupID)) chunks, bool is_err, Error *err)
 {
   HlMessage hl_msg = KV_INITIAL_VALUE;
   for (size_t i = 0; i < chunks.size; i++) {
     VALIDATE_T("chunk", kObjectTypeArray, chunks.items[i].type, {
       goto free_exit;
     });
-    Array chunk = chunks.items[i].data.array;
+    Tuple(String, *HLGroupID) chunk = chunks.items[i].data.array;
     VALIDATE((chunk.size > 0 && chunk.size <= 2 && chunk.items[0].type == kObjectTypeString),
              "%s", "Invalid chunk: expected Array with 1 or 2 Strings", {
       goto free_exit;
@@ -784,10 +785,10 @@ HlMessage parse_hl_msg(Array chunks, bool is_err, Error *err)
 
     String str = copy_string(chunk.items[0].data.string, NULL);
 
-    int hl_id = is_err ? HLF_E : 0;
-    if (chunk.size == 2) {
-      hl_id = object_to_hl_id(chunk.items[1], "text highlight", err);
-    }
+    int hl_id =
+      chunk.size == 2 ? object_to_hl_id(chunk.items[1], "text highlight", err)
+                      : is_err ? HLF_E
+                               : 0;
     kv_push(hl_msg, ((HlMessageChunk){ .text = str, .hl_id = hl_id }));
   }
 
@@ -1049,32 +1050,26 @@ const char *get_default_stl_hl(win_T *wp, bool use_winbar, int stc_hl_id)
   }
 }
 
-int find_sid(uint64_t channel_id)
-{
-  switch (channel_id) {
-  case VIML_INTERNAL_CALL:
-  // TODO(autocmd): Figure out what this should be
-  // return SID_API_CLIENT;
-  case LUA_INTERNAL_CALL:
-    return SID_LUA;
-  default:
-    return SID_API_CLIENT;
-  }
-}
-
 /// Sets sctx for API calls.
 ///
-/// @param channel_id     api clients id. Used to determine if it's a internal
-///                       call or a rpc call.
-/// @return returns       previous value of current_sctx. To be used
-///                       to be used for restoring sctx to previous state.
+/// @param channel_id  api client id to determine if it's a internal or RPC call.
+///
+/// @return  previous value of current_sctx. To be used later for restoring sctx.
 sctx_T api_set_sctx(uint64_t channel_id)
 {
   sctx_T old_current_sctx = current_sctx;
+  // The script context is already properly set when calling an API from Vimscript.
   if (channel_id != VIML_INTERNAL_CALL) {
-    current_sctx.sc_sid =
-      channel_id == LUA_INTERNAL_CALL ? SID_LUA : SID_API_CLIENT;
     current_sctx.sc_lnum = 0;
+    if (channel_id == LUA_INTERNAL_CALL) {
+      // When the current script is a Lua script, don't override sc_sid.
+      if (!script_is_lua(current_sctx.sc_sid)) {
+        current_sctx.sc_sid = SID_LUA;
+      }
+    } else {
+      current_sctx.sc_sid = SID_API_CLIENT;
+      current_sctx.sc_chan = channel_id;
+    }
   }
   return old_current_sctx;
 }

@@ -43,11 +43,16 @@
 local query = require('vim.treesitter.query')
 local language = require('vim.treesitter.language')
 local Range = require('vim.treesitter._range')
+local hrtime = vim.uv.hrtime
 
-local default_parse_timeout_ms = 3
+-- Parse in 3ms chunks.
+local default_parse_timeout_ns = 3 * 1000000
 
 ---@type Range2
-local entire_document_range = { 0, math.huge }
+local entire_document_range = {
+  0,
+  math.huge --[[@as integer]],
+}
 
 ---@alias TSCallbackName
 ---| 'changedtree'
@@ -198,16 +203,16 @@ function LanguageTree:_set_logger()
   self._parser:_set_logger(log_lex, log_parse, self._logger)
 end
 
----Measure execution time of a function
+---Measure execution time of a function, in nanoseconds.
 ---@generic R1, R2, R3
 ---@param f fun(): R1, R2, R3
 ---@return number, R1, R2, R3
 local function tcall(f, ...)
-  local start = vim.uv.hrtime()
+  local start = hrtime()
   ---@diagnostic disable-next-line
   local r = { f(...) }
   --- @type number
-  local duration = (vim.uv.hrtime() - start) / 1000000
+  local duration = hrtime() - start
   --- @diagnostic disable-next-line: redundant-return-value
   return duration, unpack(r)
 end
@@ -372,7 +377,6 @@ end
 --- @return Range6[] changes
 --- @return integer no_regions_parsed
 --- @return number total_parse_time
---- @return boolean finished whether async parsing still needs time
 function LanguageTree:_parse_regions(range, thread_state)
   local changes = {}
   local no_regions_parsed = 0
@@ -389,19 +393,32 @@ function LanguageTree:_parse_regions(range, thread_state)
       )
     then
       self._parser:set_included_ranges(ranges)
-      self._parser:set_timeout(thread_state.timeout and thread_state.timeout * 1000 or 0) -- ms -> micros
 
-      local parse_time, tree, tree_changes =
-        tcall(self._parser.parse, self._parser, self._trees[i], self._source, true)
+      local parse_time, tree, tree_changes = tcall(
+        self._parser.parse,
+        self._parser,
+        self._trees[i],
+        self._source,
+        true,
+        thread_state.timeout
+      )
       while true do
         if tree then
           break
         end
-        coroutine.yield(changes, no_regions_parsed, total_parse_time, false)
+        coroutine.yield(self._trees, false)
 
-        parse_time, tree, tree_changes =
-          tcall(self._parser.parse, self._parser, self._trees[i], self._source, true)
+        parse_time, tree, tree_changes = tcall(
+          self._parser.parse,
+          self._parser,
+          self._trees[i],
+          self._source,
+          true,
+          thread_state.timeout
+        )
       end
+
+      self:_subtract_time(thread_state, parse_time)
 
       self:_do_callback('changedtree', tree_changes, tree)
       self._trees[i] = tree
@@ -418,7 +435,7 @@ function LanguageTree:_parse_regions(range, thread_state)
     end
   end
 
-  return changes, no_regions_parsed, total_parse_time, true
+  return changes, no_regions_parsed, total_parse_time
 end
 
 --- @private
@@ -502,7 +519,7 @@ function LanguageTree:_async_parse(range, on_parse)
   local buf = is_buffer_parser and vim.b[source] or nil
   local ct = is_buffer_parser and buf.changedtick or nil
   local total_parse_time = 0
-  local redrawtime = vim.o.redrawtime
+  local redrawtime = vim.o.redrawtime * 1000000
 
   local thread_state = {} ---@type ParserThreadState
 
@@ -525,7 +542,7 @@ function LanguageTree:_async_parse(range, on_parse)
       end
     end
 
-    thread_state.timeout = not vim.g._ts_force_sync_parsing and default_parse_timeout_ms or nil
+    thread_state.timeout = not vim.g._ts_force_sync_parsing and default_parse_timeout_ns or nil
     local parse_time, trees, finished = tcall(parse, self, range, thread_state)
     total_parse_time = total_parse_time + parse_time
 
@@ -572,6 +589,15 @@ function LanguageTree:parse(range, on_parse)
   return trees
 end
 
+---@param thread_state ParserThreadState
+---@param time integer
+function LanguageTree:_subtract_time(thread_state, time)
+  thread_state.timeout = thread_state.timeout and math.max(thread_state.timeout - time, 0)
+  if thread_state.timeout == 0 then
+    coroutine.yield(self._trees, false)
+  end
+end
+
 --- @private
 --- @param range boolean|Range|nil
 --- @param thread_state ParserThreadState
@@ -592,19 +618,8 @@ function LanguageTree:_parse(range, thread_state)
 
   -- At least 1 region is invalid
   if not self:is_valid(true, type(range) == 'table' and range or nil) then
-    ---@type fun(self: vim.treesitter.LanguageTree, range: boolean|Range?, thread_state: ParserThreadState): Range6[], integer, number, boolean
-    local parse_regions = coroutine.wrap(self._parse_regions)
-    while true do
-      local is_finished
-      changes, no_regions_parsed, total_parse_time, is_finished =
-        parse_regions(self, range, thread_state)
-      thread_state.timeout = thread_state.timeout
-        and math.max(thread_state.timeout - total_parse_time, 0)
-      if is_finished then
-        break
-      end
-      coroutine.yield(self._trees, false)
-    end
+    changes, no_regions_parsed, total_parse_time = self:_parse_regions(range, thread_state)
+
     -- Need to run injections when we parsed something
     if no_regions_parsed > 0 then
       self._processed_injection_range = nil
@@ -621,18 +636,9 @@ function LanguageTree:_parse(range, thread_state)
       )
     )
   then
-    ---@type fun(self: vim.treesitter.LanguageTree, thread_state: ParserThreadState): table<string, Range6[][]>?
-    local get_injections = coroutine.wrap(self._get_injections)
-    local injections_by_lang
-    query_time, injections_by_lang = tcall(get_injections, self, range, thread_state)
-    while not injections_by_lang do
-      coroutine.yield()
-      query_time, injections_by_lang = tcall(get_injections, self, range, thread_state)
-    end
-
-    self:_add_injections(injections_by_lang)
-
-    thread_state.timeout = thread_state.timeout and math.max(thread_state.timeout - query_time, 0)
+    local injections_by_lang = self:_get_injections(range, thread_state)
+    local time = tcall(self._add_injections, self, injections_by_lang)
+    self:_subtract_time(thread_state, time)
   end
 
   self:_log({
@@ -644,21 +650,7 @@ function LanguageTree:_parse(range, thread_state)
   })
 
   for _, child in pairs(self._children) do
-    if thread_state.timeout == 0 then
-      coroutine.yield(self._trees, false)
-    end
-
-    ---@type fun(): table<integer, TSTree>, boolean
-    local parse = coroutine.wrap(child._parse)
-
-    while true do
-      local ctime, _, child_finished = tcall(parse, child, range, thread_state)
-      if child_finished then
-        thread_state.timeout = thread_state.timeout and math.max(thread_state.timeout - ctime, 0)
-        break
-      end
-      coroutine.yield(self._trees, child_finished)
-    end
+    child:_parse(range, thread_state)
   end
 
   return self._trees, true
@@ -885,6 +877,39 @@ local function get_node_ranges(node, source, metadata, include_children)
   return ranges
 end
 
+---Finds the intersection between two regions, assuming they are sorted in ascending order by
+---starting point.
+---@param region1 Range6[]
+---@param region2 Range6[]?
+---@return Range6[]
+local function clip_regions(region1, region2)
+  if not region2 then
+    return region1
+  end
+
+  local result = {}
+  local i, j = 1, 1
+
+  while i <= #region1 and j <= #region2 do
+    local r1 = region1[i]
+    local r2 = region2[j]
+
+    local intersection = Range.intersection(r1, r2)
+    if intersection then
+      table.insert(result, intersection)
+    end
+
+    -- Advance the range that ends earlier
+    if Range.cmp_pos.le(r1[4], r1[5], r2[4], r2[5]) then
+      i = i + 1
+    else
+      j = j + 1
+    end
+  end
+
+  return result
+end
+
 ---@nodoc
 ---@class vim.treesitter.languagetree.InjectionElem
 ---@field combined boolean
@@ -892,35 +917,43 @@ end
 
 ---@alias vim.treesitter.languagetree.Injection table<string,table<integer,vim.treesitter.languagetree.InjectionElem>>
 
----@param t table<integer,vim.treesitter.languagetree.Injection>
----@param tree_index integer
+---@param t vim.treesitter.languagetree.Injection
 ---@param pattern integer
 ---@param lang string
 ---@param combined boolean
 ---@param ranges Range6[]
-local function add_injection(t, tree_index, pattern, lang, combined, ranges)
+---@param parent_ranges Range6[]?
+---@param result table<string,Range6[][]>
+local function add_injection(t, pattern, lang, combined, ranges, parent_ranges, result)
   if #ranges == 0 then
     -- Make sure not to add an empty range set as this is interpreted to mean the whole buffer.
     return
   end
 
-  -- Each tree index should be isolated from the other nodes.
-  if not t[tree_index] then
-    t[tree_index] = {}
+  if not result[lang] then
+    result[lang] = {}
   end
 
-  if not t[tree_index][lang] then
-    t[tree_index][lang] = {}
+  if not combined then
+    table.insert(result[lang], clip_regions(ranges, parent_ranges))
+    return
   end
 
-  -- Key this by pattern. If combined is set to true all captures of this pattern
+  if not t[lang] then
+    t[lang] = {}
+  end
+
+  -- Key this by pattern. For combined injections, all captures of this pattern
   -- will be parsed by treesitter as the same "source".
-  -- If combined is false, each "region" will be parsed as a single source.
-  if not t[tree_index][lang][pattern] then
-    t[tree_index][lang][pattern] = { combined = combined, regions = {} }
+  if not t[lang][pattern] then
+    local regions = {}
+    t[lang][pattern] = regions
+    table.insert(result[lang], regions)
   end
 
-  table.insert(t[tree_index][lang][pattern].regions, ranges)
+  for _, range in ipairs(clip_regions(ranges, parent_ranges)) do
+    table.insert(t[lang][pattern], range)
+  end
 end
 
 -- TODO(clason): replace by refactored `ts.has_parser` API (without side effects)
@@ -980,25 +1013,14 @@ function LanguageTree:_get_injection(match, metadata)
         local ft = vim.filetype.match({ filename = text })
         lang = ft and resolve_lang(ft)
       elseif name == 'injection.content' then
-        ranges = get_node_ranges(node, self._source, metadata[id], include_children)
+        for _, range in ipairs(get_node_ranges(node, self._source, metadata[id], include_children)) do
+          ranges[#ranges + 1] = range
+        end
       end
     end
   end
 
   return lang, combined, ranges
-end
-
---- Can't use vim.tbl_flatten since a range is just a table.
----@param regions Range6[][]
----@return Range6[]
-local function combine_regions(regions)
-  local result = {} ---@type Range6[]
-  for _, region in ipairs(regions) do
-    for _, range in ipairs(region) do
-      result[#result + 1] = range
-    end
-  end
-  return result
 end
 
 --- Gets language injection regions by language.
@@ -1017,14 +1039,18 @@ function LanguageTree:_get_injections(range, thread_state)
     return {}
   end
 
-  ---@type table<integer,vim.treesitter.languagetree.Injection>
-  local injections = {}
-  local start = vim.uv.hrtime()
+  local start = hrtime()
+
+  ---@type table<string,Range6[][]>
+  local result = {}
 
   local full_scan = range == true or self._injection_query.has_combined_injections
 
-  for index, tree in pairs(self._trees) do
+  for tree_index, tree in pairs(self._trees) do
+    ---@type vim.treesitter.languagetree.Injection
+    local injections = {}
     local root_node = tree:root()
+    local parent_ranges = self._regions and self._regions[tree_index] or nil
     local start_line, end_line ---@type integer, integer
     if full_scan then
       start_line, _, end_line = root_node:range()
@@ -1037,39 +1063,15 @@ function LanguageTree:_get_injections(range, thread_state)
     do
       local lang, combined, ranges = self:_get_injection(match, metadata)
       if lang then
-        add_injection(injections, index, pattern, lang, combined, ranges)
+        add_injection(injections, pattern, lang, combined, ranges, parent_ranges, result)
       else
         self:_log('match from injection query failed for pattern', pattern)
       end
 
       -- Check the current function duration against the timeout, if it exists.
-      if thread_state.timeout and vim.uv.hrtime() - start > thread_state.timeout * 1000000 then
-        coroutine.yield()
-        start = vim.uv.hrtime()
-      end
-    end
-  end
-
-  ---@type table<string,Range6[][]>
-  local result = {}
-
-  -- Generate a map by lang of node lists.
-  -- Each list is a set of ranges that should be parsed together.
-  for _, lang_map in pairs(injections) do
-    for lang, patterns in pairs(lang_map) do
-      if not result[lang] then
-        result[lang] = {}
-      end
-
-      for _, entry in pairs(patterns) do
-        if entry.combined then
-          table.insert(result[lang], combine_regions(entry.regions))
-        else
-          for _, ranges in pairs(entry.regions) do
-            table.insert(result[lang], ranges)
-          end
-        end
-      end
+      local current_time = hrtime()
+      self:_subtract_time(thread_state, current_time - start)
+      start = hrtime()
     end
   end
 
@@ -1105,8 +1107,8 @@ function LanguageTree:_edit(
   end_row_new,
   end_col_new
 )
-  for _, tree in pairs(self._trees) do
-    tree:edit(
+  for i, tree in pairs(self._trees) do
+    self._trees[i] = tree:edit(
       start_byte,
       end_byte_old,
       end_byte_new,
@@ -1167,7 +1169,6 @@ function LanguageTree:_edit(
   end
 end
 
----@nodoc
 ---@param bufnr integer
 ---@param changed_tick integer
 ---@param start_row integer
@@ -1239,12 +1240,10 @@ function LanguageTree:_on_bytes(
   )
 end
 
----@nodoc
 function LanguageTree:_on_reload()
   self:invalidate(true)
 end
 
----@nodoc
 function LanguageTree:_on_detach(...)
   self:invalidate(true)
   self:_do_callback('detach', ...)
@@ -1293,12 +1292,13 @@ end
 local function tree_contains(tree, range)
   local tree_ranges = tree:included_ranges(false)
 
-  return Range.contains({
-    tree_ranges[1][1],
-    tree_ranges[1][2],
-    tree_ranges[#tree_ranges][3],
-    tree_ranges[#tree_ranges][4],
-  }, range)
+  for _, tree_range in ipairs(tree_ranges) do
+    if Range.contains(tree_range, range) then
+      return true
+    end
+  end
+
+  return false
 end
 
 --- Determines whether {range} is contained in the |LanguageTree|.

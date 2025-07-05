@@ -3,6 +3,7 @@
 #include <stddef.h>  // IWYU pragma: keep
 #include <stdint.h>  // IWYU pragma: keep
 
+#include "nvim/api/private/defs.h"  // IWYU pragma: keep
 #include "nvim/eval/typval_defs.h"  // IWYU pragma: keep
 #include "nvim/getchar_defs.h"  // IWYU pragma: keep
 #include "nvim/types_defs.h"  // IWYU pragma: keep
@@ -15,6 +16,8 @@ typedef enum {
 } flush_buffers_T;
 
 enum { NSCRIPT = 15, };  ///< Maximum number of streams to read script from
+
+EXTERN bool test_disable_char_avail INIT( = false);
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "getchar.h.generated.h"

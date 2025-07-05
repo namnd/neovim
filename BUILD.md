@@ -223,7 +223,7 @@ rebuild:
 
 ## Third-party dependencies
 
-Reference the [Debian package](https://packages.debian.org/sid/source/neovim) (or alternatively, the [Homebrew formula](https://github.com/Homebrew/homebrew-core/blob/master/Formula/neovim.rb)) for the precise list of dependencies/versions.
+Reference the [Debian package](https://packages.debian.org/sid/source/neovim) (or alternatively, the [Homebrew formula](https://github.com/Homebrew/homebrew-core/blob/master/Formula/n/neovim.rb)) for the precise list of dependencies/versions.
 
 To build the bundled dependencies using CMake:
 
@@ -258,6 +258,29 @@ cmake --build build
 3. Run `make`, `ninja`, or whatever build tool you told CMake to generate.
     - Using `ninja` is strongly recommended.
 4. If treesitter parsers are not bundled, they need to be available in a `parser/` runtime directory (e.g. `/usr/share/nvim/runtime/parser/`).
+
+### How to build static binary (on Linux)
+
+1. Use a linux distribution which uses musl C. We will use Alpine Linux but any distro with musl should work. (glibc does not support static linking)
+2. Run make passing the `STATIC_BUILD` variable: `make CMAKE_EXTRA_FLAGS="-DSTATIC_BUILD=1"`
+
+In case you are not using Alpine Linux you can use a container to do the build the binary:
+
+```bash
+podman run \
+  --rm \
+  -it \
+  -v "$PWD:/workdir" \
+  -w /workdir \
+  alpine:latest \
+  bash -c 'apk add build-base cmake coreutils curl gettext-tiny-dev && make CMAKE_EXTRA_FLAGS="-DSTATIC_BUILD=1"'
+```
+
+The resulting binary in `build/bin/nvim` will have all the dependencies statically linked:
+
+```
+build/bin/nvim: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, BuildID[sha1]=b93fa8e678d508ac0a76a2e3da20b119105f1b2d, with debug_info, not stripped
+```
 
 #### Debian 10 (Buster) example:
 

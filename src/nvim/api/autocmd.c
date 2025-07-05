@@ -53,14 +53,14 @@ static int64_t next_autocmd_id = 1;
 /// ```lua
 /// -- Matches all criteria
 /// autocommands = vim.api.nvim_get_autocmds({
-///   group = "MyGroup",
-///   event = {"BufEnter", "BufWinEnter"},
-///   pattern = {"*.c", "*.h"}
+///   group = 'MyGroup',
+///   event = {'BufEnter', 'BufWinEnter'},
+///   pattern = {'*.c', '*.h'}
 /// })
 ///
 /// -- All commands from one group
 /// autocommands = vim.api.nvim_get_autocmds({
-///   group = "MyGroup",
+///   group = 'MyGroup',
 /// })
 /// ```
 ///
@@ -90,7 +90,8 @@ static int64_t next_autocmd_id = 1;
 ///             - once: (boolean) whether the autocommand is only run once.
 ///             - pattern: (string) the autocommand pattern.
 ///               If the autocommand is buffer local |autocmd-buffer-local|:
-Array nvim_get_autocmds(Dict(get_autocmds) *opts, Arena *arena, Error *err)
+ArrayOf(DictAs(get_autocmds__ret)) nvim_get_autocmds(Dict(get_autocmds) *opts, Arena *arena,
+                                                     Error *err)
   FUNC_API_SINCE(9)
 {
   ArrayBuilder autocmd_list = KV_INITIAL_VALUE;
@@ -336,8 +337,8 @@ cleanup:
 /// Example using Lua callback:
 ///
 /// ```lua
-/// vim.api.nvim_create_autocmd({"BufEnter", "BufWinEnter"}, {
-///   pattern = {"*.c", "*.h"},
+/// vim.api.nvim_create_autocmd({'BufEnter', 'BufWinEnter'}, {
+///   pattern = {'*.c', '*.h'},
 ///   callback = function(ev)
 ///     print(string.format('event fired: %s', vim.inspect(ev)))
 ///   end
@@ -347,8 +348,8 @@ cleanup:
 /// Example using an Ex command as the handler:
 ///
 /// ```lua
-/// vim.api.nvim_create_autocmd({"BufEnter", "BufWinEnter"}, {
-///   pattern = {"*.c", "*.h"},
+/// vim.api.nvim_create_autocmd({'BufEnter', 'BufWinEnter'}, {
+///   pattern = {'*.c', '*.h'},
 ///   command = "echo 'Entering a C or C++ file'",
 /// })
 /// ```
@@ -357,7 +358,7 @@ cleanup:
 /// and "~" must be expanded explicitly:
 ///
 /// ```lua
-/// pattern = vim.fn.expand("~") .. "/some/path/*.py"
+/// pattern = vim.fn.expand('~') .. '/some/path/*.py'
 /// ```
 ///
 /// @param event (string|array) Event(s) that will trigger the handler (`callback` or `command`).
@@ -369,8 +370,8 @@ cleanup:
 ///             - desc (string) optional: description (for documentation and troubleshooting).
 ///             - callback (function|string) optional: Lua function (or Vimscript function name, if
 ///             string) called when the event(s) is triggered. Lua callback can return a truthy
-///             value (not `false` or `nil`) to delete the autocommand. Receives one argument,
-///             a table with these keys: [event-args]()
+///             value (not `false` or `nil`) to delete the autocommand, and receives one argument, a
+///             table with these keys: [event-args]()
 ///                 - id: (number) autocommand id
 ///                 - event: (string) name of the triggered event |autocmd-events|
 ///                 - group: (number|nil) autocommand group id, if any
@@ -603,7 +604,7 @@ void nvim_clear_autocmds(Dict(clear_autocmds) *opts, Arena *arena, Error *err)
 /// To get an existing group id, do:
 ///
 /// ```lua
-/// local id = vim.api.nvim_create_augroup("MyGroup", {
+/// local id = vim.api.nvim_create_augroup('my.lsp.config', {
 ///     clear = false
 /// })
 /// ```

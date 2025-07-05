@@ -40,6 +40,8 @@ enum {
   WILD_NOERROR              = 0x800,  ///< sets EW_NOERROR
   WILD_BUFLASTUSED          = 0x1000,
   BUF_DIFF_FILTER           = 0x2000,
+  WILD_KEEP_SOLE_ITEM       = 0x4000,
+  WILD_MAY_EXPAND_PATTERN   = 0x8000,
 };
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS

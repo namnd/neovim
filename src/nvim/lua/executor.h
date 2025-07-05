@@ -8,6 +8,7 @@
 #include "nvim/api/private/helpers.h"
 #include "nvim/cmdexpand_defs.h"  // IWYU pragma: keep
 #include "nvim/ex_cmds_defs.h"  // IWYU pragma: keep
+#include "nvim/garray_defs.h"  // IWYU pragma: keep
 #include "nvim/macros_defs.h"
 #include "nvim/types_defs.h"
 #include "nvim/usercmd.h"  // IWYU pragma: keep
@@ -25,7 +26,7 @@ typedef struct {
 } nlua_ref_state_t;
 
 #define NLUA_EXEC_STATIC(cstr, arg, mode, arena, err) \
-  nlua_exec(STATIC_CSTR_AS_STRING(cstr), arg, mode, arena, err)
+  nlua_exec(STATIC_CSTR_AS_STRING(cstr), NULL, arg, mode, arena, err)
 
 #define NLUA_CLEAR_REF(x) \
   do { \
@@ -42,6 +43,9 @@ typedef enum {
                 ///< Should also be used when return value is ignored, as it is allocation-free
   kRetLuaref,  ///< return value becomes a single Luaref, regardless of type (except NIL)
 } LuaRetMode;
+
+/// Maximum number of errors in vim.ui_attach() and decor provider callbacks.
+enum { CB_MAX_ERROR = 3, };
 
 /// To use with kRetNilBool for quick truthiness check
 #define LUARET_TRUTHY(res) ((res).type == kObjectTypeBoolean && (res).data.boolean == true)

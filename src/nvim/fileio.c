@@ -58,6 +58,7 @@
 #include "nvim/os/fs_defs.h"
 #include "nvim/os/input.h"
 #include "nvim/os/os.h"
+#include "nvim/os/os_defs.h"
 #include "nvim/os/time.h"
 #include "nvim/path.h"
 #include "nvim/pos_defs.h"
@@ -353,10 +354,9 @@ int readfile(char *fname, char *sfname, linenr_T from, linenr_T lines_to_skip,
     }
   }
 
-  if (!read_buffer && !read_stdin && !read_fifo) {
+  if (!read_stdin && fname != NULL) {
     perm = os_getperm(fname);
-    // On Unix it is possible to read a directory, so we have to
-    // check for it before os_open().
+  }
 
 #ifdef OPEN_CHR_FILES
 # define IS_CHR_DEV(perm, fname) S_ISCHR(perm) && is_dev_fd_file(fname)
@@ -364,12 +364,15 @@ int readfile(char *fname, char *sfname, linenr_T from, linenr_T lines_to_skip,
 # define IS_CHR_DEV(perm, fname) false
 #endif
 
+  if (!read_stdin && !read_buffer && !read_fifo) {
     if (perm >= 0 && !S_ISREG(perm)                 // not a regular file ...
         && !S_ISFIFO(perm)                          // ... or fifo
         && !S_ISSOCK(perm)                          // ... or socket
         && !(IS_CHR_DEV(perm, fname))
         // ... or a character special file named /dev/fd/<n>
         ) {
+      // On Unix it is possible to read a directory, so we have to
+      // check for it before os_open().
       if (S_ISDIR(perm)) {
         if (!silent) {
           filemess(curbuf, fname, _(msg_is_a_directory));
@@ -3039,7 +3042,7 @@ int buf_check_timestamp(buf_T *buf)
         }
         msg_clr_eos();
         msg_end();
-        if (emsg_silent == 0 && !in_assert_fails) {
+        if (emsg_silent == 0 && !in_assert_fails && !ui_has(kUIMessages)) {
           ui_flush();
           // give the user some time to think about it
           os_delay(1004, true);
@@ -3273,10 +3276,10 @@ static void vim_mktempdir(void)
   mode_t umask_save = umask(0077);
   for (size_t i = 0; i < ARRAY_SIZE(temp_dirs); i++) {
     // Expand environment variables, leave room for "/tmp/nvim.<user>/XXXXXX/999999999".
-    expand_env((char *)temp_dirs[i], tmp, TEMP_FILE_PATH_MAXLEN - 64);
+    size_t tmplen = expand_env((char *)temp_dirs[i], tmp, TEMP_FILE_PATH_MAXLEN - 64);
     if (!os_isdir(tmp)) {
       if (strequal("$TMPDIR", temp_dirs[i])) {
-        if (!os_getenv("TMPDIR")) {
+        if (!os_env_exists("TMPDIR", true)) {
           DLOG("$TMPDIR is unset");
         } else {
           WLOG("$TMPDIR tempdir not a directory (or does not exist): \"%s\"", tmp);
@@ -3286,9 +3289,13 @@ static void vim_mktempdir(void)
     }
 
     // "/tmp/" exists, now try to create "/tmp/nvim.<user>/".
-    add_pathsep(tmp);
-    xstrlcat(tmp, "nvim.", sizeof(tmp));
-    xstrlcat(tmp, user, sizeof(tmp));
+    if (!after_pathsep(tmp, tmp + tmplen)) {
+      tmplen += (size_t)vim_snprintf(tmp + tmplen, sizeof(tmp) - tmplen, PATHSEPSTR);
+      assert(tmplen < sizeof(tmp));
+    }
+    tmplen += (size_t)vim_snprintf(tmp + tmplen, sizeof(tmp) - tmplen,
+                                   "nvim.%s", user);
+    assert(tmplen < sizeof(tmp));
     os_mkdir(tmp, 0700);  // Always create, to avoid a race.
     bool owned = os_file_owned(tmp);
     bool isdir = os_isdir(tmp);
@@ -3299,7 +3306,10 @@ static void vim_mktempdir(void)
     bool valid = isdir && owned;  // TODO(justinmk): Windows ACL?
 #endif
     if (valid) {
-      add_pathsep(tmp);
+      if (!after_pathsep(tmp, tmp + tmplen)) {
+        tmplen += (size_t)vim_snprintf(tmp + tmplen, sizeof(tmp) - tmplen, PATHSEPSTR);
+        assert(tmplen < sizeof(tmp));
+      }
     } else {
       if (!owned) {
         ELOG("tempdir root not owned by current user (%s): %s", user, tmp);
@@ -3313,11 +3323,15 @@ static void vim_mktempdir(void)
 #endif
       // If our "root" tempdir is invalid or fails, proceed without "<user>/".
       // Else user1 could break user2 by creating "/tmp/nvim.user2/".
-      tmp[strlen(tmp) - strlen(user)] = NUL;
+      tmplen -= strlen(user);
+      tmp[tmplen] = NUL;
     }
 
     // Now try to create "/tmp/nvim.<user>/XXXXXX".
-    xstrlcat(tmp, "XXXXXX", sizeof(tmp));  // mkdtemp "template", will be replaced with random alphanumeric chars.
+    // "XXXXXX" is mkdtemp "template", will be replaced with random alphanumeric chars.
+    tmplen += (size_t)vim_snprintf(tmp + tmplen, sizeof(tmp) - tmplen, "XXXXXX");
+    assert(tmplen < sizeof(tmp));
+    (void)tmplen;
     int r = os_mkdtemp(tmp, path);
     if (r != 0) {
       WLOG("tempdir create failed: %s: %s", os_strerror(r), tmp);

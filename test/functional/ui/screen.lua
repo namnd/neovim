@@ -494,9 +494,8 @@ function Screen:expect(expected, attr_ids, ...)
 
   local expected_rows = {} --- @type string[]
   if grid then
-    -- Remove the last line and dedent. Note that gsub returns more then one
-    -- value.
-    grid = dedent(grid:gsub('\n[ ]+$', ''), 0)
+    -- Dedent (ignores last line if it is blank).
+    grid = dedent(grid, 0)
     for row in grid:gmatch('[^\n]+') do
       table.insert(expected_rows, row)
     end
@@ -587,6 +586,7 @@ function Screen:expect(expected, attr_ids, ...)
             after = after:sub(e + 1)
           end
         end
+        pat = pat and '^' .. pat .. '$'
         if row ~= actual_rows[i] and (not pat or not actual_rows[i]:match(pat)) then
           msg_expected_rows[i] = '*' .. msg_expected_rows[i]
           if i <= #actual_rows then
@@ -700,6 +700,7 @@ screen:redraw_debug() to show all intermediate screen states.]]
     self.cmdline[self.cmdline_hide_level] = nil
     self.cmdline_hide_level = nil
   end
+  self.messages, self.msg_history = {}, {}
 end
 
 function Screen:expect_unchanged(intermediate, waittime_ms)
@@ -954,11 +955,13 @@ function Screen:_handle_grid_resize(grid, width, height)
   }
 end
 
-function Screen:_handle_msg_set_pos(grid, row, scrolled, char)
+function Screen:_handle_msg_set_pos(grid, row, scrolled, char, zindex, compindex)
   self.msg_grid = grid
   self.msg_grid_pos = row
   self.msg_scrolled = scrolled
   self.msg_sep_char = char
+  self.msg_zindex = zindex
+  self.msg_compindex = compindex
 end
 
 function Screen:_handle_flush() end
@@ -974,6 +977,10 @@ function Screen:_reset()
   self.wildmenu_items = nil
   self.wildmenu_pos = nil
   self._grid_win_extmarks = {}
+  self.msg_grid = nil
+  self.msg_grid_pos = nil
+  self.msg_scrolled = false
+  self.msg_sep_char = nil
 end
 
 --- @param cursor_style_enabled boolean
@@ -1225,12 +1232,13 @@ end
 --- @param row integer
 --- @param col integer
 --- @param items integer[][]
-function Screen:_handle_grid_line(grid, row, col, items)
+function Screen:_handle_grid_line(grid, row, col, items, wrap)
   assert(self._options.ext_linegrid)
   assert(#items > 0)
   local line = self._grids[grid].rows[row + 1]
   local colpos = col + 1
   local hl_id = 0
+  line.wrap = wrap
   for _, item in ipairs(items) do
     local text, hl_id_cell, count = item[1], item[2], item[3]
     if hl_id_cell ~= nil then
@@ -1377,12 +1385,12 @@ function Screen:_handle_wildmenu_hide()
   self.wildmenu_items, self.wildmenu_pos = nil, nil
 end
 
-function Screen:_handle_msg_show(kind, chunks, replace_last, history)
+function Screen:_handle_msg_show(kind, chunks, replace_last, history, append)
   local pos = #self.messages
   if not replace_last or pos == 0 then
     pos = pos + 1
   end
-  self.messages[pos] = { kind = kind, content = chunks, history = history }
+  self.messages[pos] = { kind = kind, content = chunks, history = history, append = append }
 end
 
 function Screen:_handle_msg_clear()
@@ -1403,10 +1411,6 @@ end
 
 function Screen:_handle_msg_history_show(entries)
   self.msg_history = entries
-end
-
-function Screen:_handle_msg_history_clear()
-  self.msg_history = {}
 end
 
 function Screen:_clear_block(grid, top, bot, left, right)
@@ -1501,13 +1505,18 @@ function Screen:_extstate_repr(attr_state)
     messages[i] = {
       kind = entry.kind,
       content = self:_chunks_repr(entry.content, attr_state),
-      history = entry.history,
+      history = entry.history or nil,
+      append = entry.append or nil,
     }
   end
 
   local msg_history = {}
   for i, entry in ipairs(self.msg_history) do
-    msg_history[i] = { kind = entry[1], content = self:_chunks_repr(entry[2], attr_state) }
+    msg_history[i] = {
+      kind = entry[1],
+      content = self:_chunks_repr(entry[2], attr_state),
+      append = entry[3] or nil,
+    }
   end
 
   local win_viewport = (next(self.win_viewport) and self.win_viewport) or nil

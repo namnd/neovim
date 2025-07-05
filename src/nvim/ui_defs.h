@@ -37,8 +37,8 @@ typedef struct {
   bool ui_ext[kUIExtCount];  ///< Externalized UI capabilities.
   int width;
   int height;
-  int pum_nlines;  /// actual nr. lines shown in PUM
-  bool pum_pos;  /// UI reports back pum position?
+  int pum_nlines;  ///< actual nr. lines shown in PUM
+  bool pum_pos;  ///< UI reports back pum position?
   double pum_row;
   double pum_col;
   double pum_height;
@@ -72,6 +72,7 @@ typedef struct {
   uint32_t nevents;  ///< number of distinct events (top-level args to "redraw"
   uint32_t ncalls;  ///< number of calls made to the current event (plus one for the name!)
   bool flushed_events;  ///< events where sent to client without "flush" event
+  bool incomplete_event;  ///< incomplete event might be pending
 
   size_t ncells_pending;  ///< total number of cells since last buffer flush
 
