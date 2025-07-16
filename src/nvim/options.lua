@@ -903,10 +903,10 @@ local options = {
           help		help buffer (do not set this manually)
           nofile	buffer is not related to a file, will not be written
           nowrite	buffer will not be written
+          prompt	buffer where only the last section can be edited, for
+        		use by plugins. |prompt-buffer|
           quickfix	list of errors |:cwindow| or locations |:lwindow|
           terminal	|terminal-emulator| buffer
-          prompt	buffer where only the last line can be edited, meant
-        		to be used by a plugin, see |prompt-buffer|
 
         This option is used together with 'bufhidden' and 'swapfile' to
         specify special kinds of buffers.   See |special-buffers|.
@@ -949,6 +949,21 @@ local options = {
       short_desc = N_('special type of buffer'),
       type = 'string',
       varname = 'p_bt',
+    },
+    {
+      defaults = 0,
+      desc = [=[
+        Sets a buffer "busy" status. Indicated in the default statusline.
+        When busy status is larger then 0 busy flag is shown in statusline.
+        The semantics of "busy" are arbitrary, typically decided by the plugin that owns the buffer.
+      ]=],
+      full_name = 'busy',
+      redraw = { 'statuslines' },
+      noglob = true,
+      scope = { 'buf' },
+      short_desc = N_('buffer is busy'),
+      type = 'number',
+      varname = 'p_busy',
     },
     {
       abbreviation = 'cmp',
@@ -5641,6 +5656,22 @@ local options = {
       varname = 'p_mmp',
     },
     {
+      abbreviation = 'msc',
+      defaults = 999,
+      desc = [=[
+        Maximum number of matches shown for the search count status |shm-S|
+        When the number of matches exceeds this value, Vim shows ">" instead
+        of the exact count to keep searching fast.
+        Note: larger values may impact performance.
+        The value must be between 1 and 9999.
+      ]=],
+      full_name = 'maxsearchcount',
+      scope = { 'global' },
+      short_desc = N_('maximum number for the search count feature'),
+      type = 'number',
+      varname = 'p_msc',
+    },
+    {
       abbreviation = 'mis',
       defaults = 25,
       desc = [=[
@@ -7071,7 +7102,7 @@ local options = {
       desc = [=[
         Maximum number of lines kept beyond the visible screen. Lines at the
         top are deleted if new lines exceed this limit.
-        Minimum is 1, maximum is 100000.
+        Minimum is 1, maximum is 1000000.
         Only in |terminal| buffers.
 
         Note: Lines that are not visible and kept in scrollback are not
@@ -7869,7 +7900,8 @@ local options = {
         	is shown), the "search hit BOTTOM, continuing at TOP" and
         	"search hit TOP, continuing at BOTTOM" messages are only
         	indicated by a "W" (Mnemonic: Wrapped) letter before the
-        	search count statistics.
+        	search count statistics.  The maximum limit can be set with
+        	the 'maxsearchcount' option.
 
         This gives you the opportunity to avoid that a change between buffers
         requires you to hit <Enter>, but still gives as useful a message as
@@ -8640,6 +8672,7 @@ local options = {
         '%=',
         "%{% &showcmdloc == 'statusline' ? '%-10.S ' : '' %}",
         "%{% exists('b:keymap_name') ? '<'..b:keymap_name..'> ' : '' %}",
+        "%{% &busy > 0 ? '◐ ' : '' %}",
         "%{% &ruler ? ( &rulerformat == '' ? '%-14.(%l,%c%V%) %P' : &rulerformat ) : '' %}",
       }),
       desc = [=[
@@ -10101,6 +10134,7 @@ local options = {
         <	'wildchar' also enables completion in search pattern contexts such as
         |/|, |?|, |:s|, |:g|, |:v|, and |:vim|.  To insert a literal <Tab>
         instead of triggering completion, type <C-V><Tab> or "\t".
+        See also |'wildoptions'|.
       ]=],
       full_name = 'wildchar',
       scope = { 'global' },
@@ -10295,12 +10329,26 @@ local options = {
     {
       abbreviation = 'wop',
       defaults = 'pum,tagfile',
-      values = { 'fuzzy', 'tagfile', 'pum' },
+      values = { 'fuzzy', 'tagfile', 'pum', 'exacttext' },
       flags = true,
       deny_duplicates = true,
       desc = [=[
         A list of words that change how |cmdline-completion| is done.
         The following values are supported:
+          exacttext	When this flag is present, search pattern completion
+        		(e.g., in |/|, |?|, |:s|, |:g|, |:v|, and |:vim|)
+        		shows exact buffer text as menu items, without
+        		preserving regex artifacts like position
+        		anchors (e.g., |/\\<|).  This provides more intuitive
+        		menu items that match the actual buffer text.
+        		However, searches may be less accurate since the
+        		pattern is not preserved exactly.
+        		By default, Vim preserves the typed pattern (with
+        		anchors) and appends the matched word.  This preserves
+        		search correctness, especially when using regular
+        		expressions or with 'smartcase' enabled.  However, the
+        		case of the appended matched word may not exactly
+        		match the case of the word in the buffer.
           fuzzy		Use |fuzzy-matching| to find completion matches. When
         		this value is specified, wildcard expansion will not
         		be used for completion.  The matches will be sorted by
@@ -10400,6 +10448,9 @@ local options = {
       type = 'number',
     },
     {
+      full_name = 'winborder',
+      scope = { 'global' },
+      cb = 'did_set_winborder',
       defaults = { if_true = '' },
       values = { '', 'double', 'single', 'shadow', 'rounded', 'solid', 'bold', 'none' },
       desc = [=[
@@ -10412,11 +10463,14 @@ local options = {
         - "shadow": Drop shadow effect, by blending with the background.
         - "single": Single-line box.
         - "solid": Adds padding by a single whitespace cell.
+        - custom: comma-separated list of exactly 8 characters in clockwise
+          order starting from topleft. Example: >lua
+             vim.o.winborder='+,-,+,|,+,-,+,|'
+        <
       ]=],
-      full_name = 'winborder',
-      scope = { 'global' },
       short_desc = N_('border of floating window'),
       type = 'string',
+      list = 'onecomma',
       varname = 'p_winborder',
     },
     {

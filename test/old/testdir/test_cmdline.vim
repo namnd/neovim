@@ -737,6 +737,32 @@ func Test_getcompletion()
   call assert_fails('call getcompletion("abc", [])', 'E1174:')
 endfunc
 
+func Test_getcompletiontype()
+  call assert_fails('call getcompletiontype()', 'E119:')
+  call assert_fails('call getcompletiontype({})', 'E1174:')
+  call assert_equal('command', getcompletiontype(''))
+  call assert_equal('', getcompletiontype('dummy '))
+  call assert_equal('', getcompletiontype('ls '))
+  call assert_equal('dir_in_path', getcompletiontype('cd '))
+  call assert_equal('var', getcompletiontype('let v:n'))
+  call assert_equal('function', getcompletiontype('call tag'))
+  call assert_equal('help', getcompletiontype('help '))
+endfunc
+
+func Test_multibyte_expression()
+  " Get a dialog in the GUI
+  CheckNotGui
+
+  " This was using uninitialized memory.
+  let lines =<< trim END
+      set verbose=6
+      norm @=ٷ
+      qall!
+  END
+  call writefile(lines, 'XmultiScript', 'D')
+  call RunVim('', '', '-u NONE -n -e -s -S XmultiScript')
+endfunc
+
 " Test for getcompletion() with "fuzzy" in 'wildoptions'
 func Test_getcompletion_wildoptions()
   let save_wildoptions = &wildoptions
@@ -4226,6 +4252,8 @@ func Test_custom_completion()
 
   call feedkeys(":Test1 \<C-R>=Check_custom_completion()\<CR>\<Esc>", "xt")
   call feedkeys(":Test2 \<C-R>=Check_customlist_completion()\<CR>\<Esc>", "xt")
+  call assert_equal('custom,CustomComplete1', getcompletiontype('Test1 '))
+  call assert_equal('customlist,CustomComplete2', getcompletiontype('Test2 '))
 
   call assert_fails("call getcompletion('', 'custom')", 'E475:')
   call assert_fails("call getcompletion('', 'customlist')", 'E475:')
@@ -4471,12 +4499,16 @@ func Test_search_complete()
   " Match case correctly
   %d
   call setline(1, ["foobar", "Foobar", "fooBAr", "FooBARR"])
+
   call feedkeys("gg/f\<tab>\<f9>", 'tx')
   call assert_equal(['fooBAr', 'foobar'], g:compl_info.matches)
   call feedkeys("gg/Fo\<tab>\<f9>", 'tx')
   call assert_equal(['Foobar', 'FooBARR'], g:compl_info.matches)
   call feedkeys("gg/FO\<tab>\<f9>", 'tx')
-  call assert_equal({},  g:compl_info)
+  call assert_equal({}, g:compl_info)
+  call feedkeys("gg/\\cFo\<tab>\<f9>", 'tx')
+  call assert_equal(['\cFoobar', '\cFooBAr', '\cFooBARR'], g:compl_info.matches)
+
   set ignorecase
   call feedkeys("gg/f\<tab>\<f9>", 'tx')
   call assert_equal(['foobar', 'fooBAr', 'fooBARR'], g:compl_info.matches)
@@ -4484,19 +4516,57 @@ func Test_search_complete()
   call assert_equal(['Foobar', 'FooBAr', 'FooBARR'], g:compl_info.matches)
   call feedkeys("gg/FO\<tab>\<f9>", 'tx')
   call assert_equal(['FOobar', 'FOoBAr', 'FOoBARR'], g:compl_info.matches)
+  call feedkeys("gg/\\Cfo\<tab>\<f9>", 'tx')
+  call assert_equal(['\CfooBAr', '\Cfoobar'], g:compl_info.matches)
+
   set smartcase
   call feedkeys("gg/f\<tab>\<f9>", 'tx')
-  call assert_equal(['foobar', 'fooBAr', 'fooBARR'], g:compl_info.matches)
+  call assert_equal(['foobar', 'fooBAr', 'foobarr'], g:compl_info.matches)
   call feedkeys("gg/Fo\<tab>\<f9>", 'tx')
   call assert_equal(['Foobar', 'FooBARR'], g:compl_info.matches)
   call feedkeys("gg/FO\<tab>\<f9>", 'tx')
-  call assert_equal({},  g:compl_info)
+  call assert_equal({}, g:compl_info)
+
+  " Issue #17680 (getcompletion() does not support search completion)
+  let result = getcompletion('%s/', 'cmdline')
+  call assert_equal([], result)
+
+  call feedkeys("gg/foob\<tab>\<f9>", 'tx')
+  call assert_equal(['foobar', 'foobarr'], g:compl_info.matches)
+  call feedkeys("gg/\\Cfo\<tab>\<f9>", 'tx')
+  call assert_equal(['\CfooBAr', '\Cfoobar'], g:compl_info.matches)
+  call feedkeys("gg/\\cFo\<tab>\<f9>", 'tx')
+  call assert_equal(['\cFoobar', '\cFooBAr', '\cFooBARR'], g:compl_info.matches)
+
+  set wildoptions+=exacttext ignorecase& smartcase&
+  call feedkeys("gg/F\<tab>\<f9>", 'tx')
+  call assert_equal(['Foobar', 'FooBARR'], g:compl_info.matches)
+  call feedkeys("gg/foob\<tab>\<f9>", 'tx')
+  call assert_equal([], g:compl_info.matches)
+  call feedkeys("gg/r\\n.\<tab>\<f9>", 'tx')
+  call assert_equal(['r\nFoobar', 'r\nfooBAr', 'r\nFooBARR'], g:compl_info.matches)
+
+  set ignorecase
+  call feedkeys("gg/F\<tab>\<f9>", 'tx')
+  call assert_equal(['Foobar', 'fooBAr', 'FooBARR', 'foobar'], g:compl_info.matches)
+  call feedkeys("gg/R\\n.\<tab>\<f9>", 'tx')
+  call assert_equal(['r\nFoobar', 'r\nfooBAr', 'r\nFooBARR'], g:compl_info.matches)
+
+  set smartcase
+  call feedkeys("gg/f\<tab>\<f9>", 'tx')
+  call assert_equal(['Foobar', 'fooBAr', 'FooBARR', 'foobar'], g:compl_info.matches)
+  call feedkeys("gg/foob\<tab>\<f9>", 'tx')
+  call assert_equal(['Foobar', 'fooBAr', 'FooBARR', 'foobar'], g:compl_info.matches)
+  call feedkeys("gg/R\\n.\<tab>\<f9>", 'tx')
+  call assert_equal({}, g:compl_info)
+  call feedkeys("gg/r\\n.*\\n\<tab>\<f9>", 'tx')
+  call assert_equal(['r\nFoobar\nfooBAr', 'r\nfooBAr\nFooBARR'], g:compl_info.matches)
 
   bw!
   call Ntest_override("char_avail", 0)
   delfunc GetComplInfo
   unlet! g:compl_info
-  set wildcharm=0 incsearch& ignorecase& smartcase&
+  set wildcharm=0 incsearch& ignorecase& smartcase& wildoptions&
 endfunc
 
 func Test_search_wildmenu_screendump()
@@ -4533,6 +4603,16 @@ func Test_search_wildmenu_screendump()
   call term_sendkeys(buf, "\<esc>gg/t.*\\n.*\\n.\<tab>")
   call VerifyScreenDump(buf, 'Test_search_wildmenu_5', {})
 
+  " 'incsearch' is redrawn after accepting completion
+  call term_sendkeys(buf, "\<esc>:set wim=full\<cr>")
+  call term_sendkeys(buf, ":set incsearch hlsearch\<cr>")
+  call term_sendkeys(buf, "/th")
+  call VerifyScreenDump(buf, 'Test_search_wildmenu_6', {})
+  call term_sendkeys(buf, "\<f5>")
+  call VerifyScreenDump(buf, 'Test_search_wildmenu_7', {})
+  call term_sendkeys(buf, "\<c-n>\<c-y>")
+  call VerifyScreenDump(buf, 'Test_search_wildmenu_8', {})
+
   call term_sendkeys(buf, "\<esc>")
   call StopVimInTerminal(buf)
 endfunc
@@ -4555,50 +4635,81 @@ func Test_range_complete()
 
   for trig in ["\<tab>", "\<c-z>"]
     call feedkeys($":%s/a{trig}\<f9>", 'xt')
-    call assert_equal(['ab', 'a', 'af'],  g:compl_info.matches)
+    call assert_equal(['ab', 'a', 'af'], g:compl_info.matches)
     " call feedkeys($":vim9cmd :%s/a{trig}\<f9>", 'xt')
     call feedkeys($":verbose :%s/a{trig}\<f9>", 'xt')
-    call assert_equal(['ab', 'a', 'af'],  g:compl_info.matches)
+    call assert_equal(['ab', 'a', 'af'], g:compl_info.matches)
   endfor
 
   call feedkeys(":%s/\<c-z>\<f9>", 'xt')
-  call assert_equal({},  g:compl_info)
+  call assert_equal({}, g:compl_info)
 
   for cmd in ['s', 'g']
-    call feedkeys(":1,2" . cmd . "/a\<c-z>\<f9>", 'xt')
-    call assert_equal(['ab', 'a'],  g:compl_info.matches)
+    call feedkeys($":1,2{cmd}/a\<c-z>\<f9>", 'xt')
+    call assert_equal(['ab', 'a'], g:compl_info.matches)
   endfor
 
   1
   call feedkeys(":.,+2s/a\<c-z>\<f9>", 'xt')
-  call assert_equal(['ab', 'a'],  g:compl_info.matches)
+  call assert_equal(['ab', 'a'], g:compl_info.matches)
 
   /f
   call feedkeys(":1,s/b\<c-z>\<f9>", 'xt')
-  call assert_equal(['b', 'ba'],  g:compl_info.matches)
+  call assert_equal(['b', 'ba'], g:compl_info.matches)
 
   /c
   call feedkeys(":\\?,4s/a\<c-z>\<f9>", 'xt')
-  call assert_equal(['a', 'af'],  g:compl_info.matches)
+  call assert_equal(['a', 'af'], g:compl_info.matches)
 
   %s/c/c/
   call feedkeys(":1,\\&s/a\<c-z>\<f9>", 'xt')
-  call assert_equal(['ab', 'a'],  g:compl_info.matches)
+  call assert_equal(['ab', 'a'], g:compl_info.matches)
 
   3
   normal! ma
   call feedkeys(":'a,$s/a\<c-z>\<f9>", 'xt')
-  call assert_equal(['a', 'af'],  g:compl_info.matches)
+  call assert_equal(['a', 'af'], g:compl_info.matches)
 
   " Line number followed by a search pattern ([start]/pattern/[command])
   call feedkeys("3/a\<c-z>\<f9>", 'xt')
-  call assert_equal(['a', 'af', 'ab'],  g:compl_info.matches)
+  call assert_equal(['a', 'af', 'ab'], g:compl_info.matches)
 
   bw!
   call Ntest_override("char_avail", 0)
   delfunc GetComplInfo
   unlet! g:compl_info
   set wildcharm=0
+endfunc
+
+" With 'noselect' in 'wildmode', ensure that the popup menu (pum) does not retain
+" its scroll position after reopening. The menu should open showing the top items,
+" regardless of previous scrolling.
+func Test_pum_scroll_noselect()
+  CheckScreendump
+
+  let lines =<< trim [SCRIPT]
+    command! -nargs=* -complete=customlist,TestFn TestCmd echo
+    func TestFn(a, b, c)
+      return map(range(1, 50), 'printf("a%d", v:val)')
+    endfunc
+    set wildmode=noselect,full
+    set wildoptions=pum
+    set wildmenu
+    set noruler
+  [SCRIPT]
+  call writefile(lines, 'XTest_pum_scroll', 'D')
+  let buf = RunVimInTerminal('-S XTest_pum_scroll', {'rows': 10})
+
+  call term_sendkeys(buf, ":TestCmd \<tab>" . repeat("\<c-n>", 20))
+  call TermWait(buf, 50)
+  call VerifyScreenDump(buf, 'Test_pum_scroll_noselect_1', {})
+
+  call term_sendkeys(buf, "\<esc>:TestCmd \<tab>")
+  call TermWait(buf, 50)
+  call VerifyScreenDump(buf, 'Test_pum_scroll_noselect_2', {})
+
+  call term_sendkeys(buf, "\<esc>")
+  call StopVimInTerminal(buf)
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

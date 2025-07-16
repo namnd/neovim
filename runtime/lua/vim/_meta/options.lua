@@ -619,10 +619,10 @@ vim.bo.bl = vim.bo.buflisted
 ---   help		help buffer (do not set this manually)
 ---   nofile	buffer is not related to a file, will not be written
 ---   nowrite	buffer will not be written
+---   prompt	buffer where only the last section can be edited, for
+--- 		use by plugins. `prompt-buffer`
 ---   quickfix	list of errors `:cwindow` or locations `:lwindow`
 ---   terminal	`terminal-emulator` buffer
----   prompt	buffer where only the last line can be edited, meant
---- 		to be used by a plugin, see `prompt-buffer`
 ---
 --- This option is used together with 'bufhidden' and 'swapfile' to
 --- specify special kinds of buffers.   See `special-buffers`.
@@ -663,6 +663,14 @@ vim.o.buftype = ""
 vim.o.bt = vim.o.buftype
 vim.bo.buftype = vim.o.buftype
 vim.bo.bt = vim.bo.buftype
+
+--- Sets a buffer "busy" status. Indicated in the default statusline.
+--- When busy status is larger then 0 busy flag is shown in statusline.
+--- The semantics of "busy" are arbitrary, typically decided by the plugin that owns the buffer.
+---
+--- @type integer
+vim.o.busy = 0
+vim.bo.busy = vim.o.busy
 
 --- Specifies details about changing the case of letters.  It may contain
 --- these words, separated by a comma:
@@ -4343,6 +4351,18 @@ vim.o.mmp = vim.o.maxmempattern
 vim.go.maxmempattern = vim.o.maxmempattern
 vim.go.mmp = vim.go.maxmempattern
 
+--- Maximum number of matches shown for the search count status `shm-S`
+--- When the number of matches exceeds this value, Vim shows ">" instead
+--- of the exact count to keep searching fast.
+--- Note: larger values may impact performance.
+--- The value must be between 1 and 9999.
+---
+--- @type integer
+vim.o.maxsearchcount = 999
+vim.o.msc = vim.o.maxsearchcount
+vim.go.maxsearchcount = vim.o.maxsearchcount
+vim.go.msc = vim.go.maxsearchcount
+
 --- Maximum number of items to use in a menu.  Used for menus that are
 --- generated from a list of items, e.g., the Buffers menu.  Changing this
 --- option has no direct effect, the menu must be refreshed first.
@@ -5375,7 +5395,7 @@ vim.wo.scr = vim.wo.scroll
 
 --- Maximum number of lines kept beyond the visible screen. Lines at the
 --- top are deleted if new lines exceed this limit.
---- Minimum is 1, maximum is 100000.
+--- Minimum is 1, maximum is 1000000.
 --- Only in `terminal` buffers.
 ---
 --- Note: Lines that are not visible and kept in scrollback are not
@@ -5996,7 +6016,8 @@ vim.bo.sw = vim.bo.shiftwidth
 --- 	is shown), the "search hit BOTTOM, continuing at TOP" and
 --- 	"search hit TOP, continuing at BOTTOM" messages are only
 --- 	indicated by a "W" (Mnemonic: Wrapped) letter before the
---- 	search count statistics.
+--- 	search count statistics.  The maximum limit can be set with
+--- 	the 'maxsearchcount' option.
 ---
 --- This gives you the opportunity to avoid that a change between buffers
 --- requires you to hit <Enter>, but still gives as useful a message as
@@ -6853,7 +6874,7 @@ vim.wo.stc = vim.wo.statuscolumn
 ---
 ---
 --- @type string
-vim.o.statusline = "%<%f %h%w%m%r %=%{% &showcmdloc == 'statusline' ? '%-10.S ' : '' %}%{% exists('b:keymap_name') ? '<'..b:keymap_name..'> ' : '' %}%{% &ruler ? ( &rulerformat == '' ? '%-14.(%l,%c%V%) %P' : &rulerformat ) : '' %}"
+vim.o.statusline = "%<%f %h%w%m%r %=%{% &showcmdloc == 'statusline' ? '%-10.S ' : '' %}%{% exists('b:keymap_name') ? '<'..b:keymap_name..'> ' : '' %}%{% &busy > 0 ? '◐ ' : '' %}%{% &ruler ? ( &rulerformat == '' ? '%-14.(%l,%c%V%) %P' : &rulerformat ) : '' %}"
 vim.o.stl = vim.o.statusline
 vim.wo.statusline = vim.o.statusline
 vim.wo.stl = vim.wo.statusline
@@ -7810,6 +7831,7 @@ vim.go.ww = vim.go.whichwrap
 --- 'wildchar' also enables completion in search pattern contexts such as
 --- `/`, `?`, `:s`, `:g`, `:v`, and `:vim`.  To insert a literal <Tab>
 --- instead of triggering completion, type <C-V><Tab> or "\t".
+--- See also `'wildoptions'`.
 ---
 --- @type integer
 vim.o.wildchar = 9
@@ -8004,6 +8026,20 @@ vim.go.wim = vim.go.wildmode
 
 --- A list of words that change how `cmdline-completion` is done.
 --- The following values are supported:
+---   exacttext	When this flag is present, search pattern completion
+--- 		(e.g., in `/`, `?`, `:s`, `:g`, `:v`, and `:vim`)
+--- 		shows exact buffer text as menu items, without
+--- 		preserving regex artifacts like position
+--- 		anchors (e.g., `/\\<`).  This provides more intuitive
+--- 		menu items that match the actual buffer text.
+--- 		However, searches may be less accurate since the
+--- 		pattern is not preserved exactly.
+--- 		By default, Vim preserves the typed pattern (with
+--- 		anchors) and appends the matched word.  This preserves
+--- 		search correctness, especially when using regular
+--- 		expressions or with 'smartcase' enabled.  However, the
+--- 		case of the appended matched word may not exactly
+--- 		match the case of the word in the buffer.
 ---   fuzzy		Use `fuzzy-matching` to find completion matches. When
 --- 		this value is specified, wildcard expansion will not
 --- 		be used for completion.  The matches will be sorted by
@@ -8094,8 +8130,15 @@ vim.wo.winbl = vim.wo.winblend
 --- - "shadow": Drop shadow effect, by blending with the background.
 --- - "single": Single-line box.
 --- - "solid": Adds padding by a single whitespace cell.
+--- - custom: comma-separated list of exactly 8 characters in clockwise
+---   order starting from topleft. Example:
 ---
---- @type ''|'double'|'single'|'shadow'|'rounded'|'solid'|'bold'|'none'
+--- ```lua
+---      vim.o.winborder='+,-,+,`,+,-,+,`'
+--- ```
+---
+---
+--- @type string
 vim.o.winborder = ""
 vim.go.winborder = vim.o.winborder
 

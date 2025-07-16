@@ -2,6 +2,7 @@ local api = vim.api
 local validate = vim.validate
 
 local lsp = vim._defer_require('vim.lsp', {
+  _capability = ..., --- @module 'vim.lsp._capability'
   _changetracking = ..., --- @module 'vim.lsp._changetracking'
   _folding_range = ..., --- @module 'vim.lsp._folding_range'
   _snippet_grammar = ..., --- @module 'vim.lsp._snippet_grammar'
@@ -1652,14 +1653,12 @@ function lsp.with(handler, override_config)
   end
 end
 
---- Registry (a table) for client-side handlers, for custom server-commands that are not in the LSP
---- specification.
+--- Map of client-defined handlers implementing custom (off-spec) commands which a server may
+--- invoke. Each key is a unique command name; each value is a function which is called when an LSP
+--- action (code action, code lenses, …) requests it by name.
 ---
---- If an LSP response contains a command which is not found in `vim.lsp.commands`, the command will
---- be executed via the LSP server using `workspace/executeCommand`.
----
---- Each key in the table is a unique command name, and each value is a function which is called
---- when an LSP action (code action, code lenses, …) triggers the command.
+--- If an LSP response requests a command not defined client-side, Nvim will forward it to the
+--- server as `workspace/executeCommand`.
 ---
 --- - Argument 1 is the `Command`:
 ---   ```
@@ -1685,7 +1684,7 @@ end
 --- end
 --- ```
 ---
---- @type table<string,function>
+--- @type table<string,fun(command: lsp.Command, ctx: table)>
 lsp.commands = setmetatable({}, {
   __newindex = function(tbl, key, value)
     assert(type(key) == 'string', 'The key for commands in `vim.lsp.commands` must be a string')

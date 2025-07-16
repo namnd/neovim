@@ -280,6 +280,7 @@ EXTERN char *p_bsk;             ///< 'backupskip'
 EXTERN char *p_breakat;         ///< 'breakat'
 EXTERN char *p_bh;              ///< 'bufhidden'
 EXTERN char *p_bt;              ///< 'buftype'
+EXTERN OptInt p_busy;           ///< 'busy'
 EXTERN char *p_cmp;             ///< 'casemap'
 EXTERN unsigned cmp_flags;
 EXTERN char *p_enc;             ///< 'encoding'
@@ -412,6 +413,7 @@ EXTERN OptInt p_mmd;            ///< 'maxmapdepth'
 EXTERN OptInt p_mmp;            ///< 'maxmempattern'
 EXTERN OptInt p_mis;            ///< 'menuitems'
 EXTERN char *p_mopt;            ///< 'messagesopt'
+EXTERN OptInt p_msc;            ///< 'maxsearchcount'
 EXTERN char *p_msm;             ///< 'mkspellmem'
 EXTERN int p_ml;                ///< 'modeline'
 EXTERN int p_mle;               ///< 'modelineexpr'
@@ -590,7 +592,7 @@ EXTERN int p_cdh;               ///< 'cdhome'
 
 #define ERR_BUFLEN 80
 
-#define SB_MAX 100000  // Maximum 'scrollback' value.
+#define SB_MAX 1000000  // Maximum 'scrollback' value.
 
 #define MAX_NUMBERWIDTH 20      // used for 'numberwidth'
 

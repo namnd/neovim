@@ -1465,7 +1465,6 @@ static int command_line_execute(VimState *state, int key)
 
   // If already used to cancel/accept wildmenu, don't process the key further.
   if (wild_type == WILD_CANCEL || wild_type == WILD_APPLY) {
-    return command_line_not_changed(s);
     // Apply search highlighting
     if (wild_type == WILD_APPLY) {
       if (s->is_state.winid != curwin->handle) {
@@ -1475,6 +1474,7 @@ static int command_line_execute(VimState *state, int key)
         may_do_incsearch_highlighting(s->firstc, s->count, &s->is_state);
       }
     }
+    return command_line_not_changed(s);
   }
 
   return command_line_handle_key(s);
@@ -3503,26 +3503,29 @@ static void ui_ext_cmdline_show(CmdlineInfo *line)
     }
     char *buf = arena_alloc(&arena, len, false);
     memset(buf, '*', len);
-    Array item = arena_array(&arena, 2);
+    Array item = arena_array(&arena, 3);
     ADD_C(item, INTEGER_OBJ(0));
     ADD_C(item, STRING_OBJ(cbuf_as_string(buf, len)));
+    ADD_C(item, INTEGER_OBJ(0));
     ADD_C(content, ARRAY_OBJ(item));
   } else if (kv_size(line->last_colors.colors)) {
     content = arena_array(&arena, kv_size(line->last_colors.colors));
     for (size_t i = 0; i < kv_size(line->last_colors.colors); i++) {
       CmdlineColorChunk chunk = kv_A(line->last_colors.colors, i);
-      Array item = arena_array(&arena, 2);
+      Array item = arena_array(&arena, 3);
       ADD_C(item, INTEGER_OBJ(chunk.hl_id == 0 ? 0 : syn_id2attr(chunk.hl_id)));
 
       assert(chunk.end >= chunk.start);
       ADD_C(item, STRING_OBJ(cbuf_as_string(line->cmdbuff + chunk.start,
                                             (size_t)(chunk.end - chunk.start))));
+      ADD_C(item, INTEGER_OBJ(chunk.hl_id));
       ADD_C(content, ARRAY_OBJ(item));
     }
   } else {
-    Array item = arena_array(&arena, 2);
+    Array item = arena_array(&arena, 3);
     ADD_C(item, INTEGER_OBJ(0));
     ADD_C(item, CSTR_AS_OBJ(line->cmdbuff));
+    ADD_C(item, INTEGER_OBJ(0));
     content = arena_array(&arena, 1);
     ADD_C(content, ARRAY_OBJ(item));
   }
@@ -3549,6 +3552,7 @@ void ui_ext_cmdline_block_append(size_t indent, const char *line)
   Array item = ARRAY_DICT_INIT;
   ADD(item, INTEGER_OBJ(0));
   ADD(item, CSTR_AS_OBJ(buf));
+  ADD(item, INTEGER_OBJ(0));
   Array content = ARRAY_DICT_INIT;
   ADD(content, ARRAY_OBJ(item));
   ADD(cmdline_block, ARRAY_OBJ(content));
@@ -4197,7 +4201,7 @@ static char *get_cmdline_completion_pattern(void)
   return xstrdup(compl_pat);
 }
 
-/// Get the current command-line completion type.
+/// Get the command-line completion type.
 static char *get_cmdline_completion(void)
 {
   if (cmdline_star > 0) {
@@ -4219,19 +4223,7 @@ static char *get_cmdline_completion(void)
     return NULL;
   }
 
-  char *cmd_compl = get_user_cmd_complete(NULL, xp_context);
-  if (cmd_compl == NULL) {
-    return NULL;
-  }
-
-  if (xp_context == EXPAND_USER_LIST || xp_context == EXPAND_USER_DEFINED) {
-    size_t buflen = strlen(cmd_compl) + strlen(p->xpc->xp_arg) + 2;
-    char *buffer = xmalloc(buflen);
-    snprintf(buffer, buflen, "%s,%s", cmd_compl, p->xpc->xp_arg);
-    return buffer;
-  }
-
-  return xstrdup(cmd_compl);
+  return cmdcomplete_type_to_str(xp_context, p->xpc->xp_arg);
 }
 
 /// "getcmdcomplpat()" function
