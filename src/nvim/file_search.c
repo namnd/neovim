@@ -62,6 +62,7 @@
 #include "nvim/eval.h"
 #include "nvim/eval/typval.h"
 #include "nvim/eval/typval_defs.h"
+#include "nvim/eval/vars.h"
 #include "nvim/file_search.h"
 #include "nvim/gettext_defs.h"
 #include "nvim/globals.h"
@@ -186,9 +187,7 @@ typedef struct {
 
 // locally needed functions
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "file_search.c.generated.h"
-#endif
+#include "file_search.c.generated.h"
 
 static const char e_path_too_long_for_completion[]
   = N_("E854: Path too long for completion");
@@ -1680,7 +1679,7 @@ char *file_name_in_line(char *line, int col, int options, int count, char *rel_f
 
   // Search forward for the last char of the file name.
   // Also allow ":/" when ':' is not in 'isfname'.
-  len = path_has_drive_letter(ptr) ? 2 : 0;
+  len = path_has_drive_letter(ptr, strlen(ptr)) ? 2 : 0;
   while (vim_isfilec((uint8_t)ptr[len]) || (ptr[len] == '\\' && ptr[len + 1] == ' ')
          || ((options & FNAME_HYP) && path_is_url(ptr + len))
          || (is_url && vim_strchr(":?&=", (uint8_t)ptr[len]) != NULL)) {

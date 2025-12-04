@@ -24,6 +24,7 @@
 #include "nvim/eval.h"
 #include "nvim/eval/typval.h"
 #include "nvim/eval/typval_defs.h"
+#include "nvim/eval/vars.h"
 #include "nvim/event/loop.h"
 #include "nvim/event/multiqueue.h"
 #include "nvim/ex_cmds.h"
@@ -160,9 +161,7 @@ enum {
   KEYLEN_PART_MAP = -2,  ///< keylen value for incomplete mapping
 };
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "getchar.c.generated.h"
-#endif
+#include "getchar.c.generated.h"
 
 static const char e_recursive_mapping[] = N_("E223: Recursive mapping");
 static const char e_cmd_mapping_must_end_with_cr[]
@@ -1799,6 +1798,16 @@ int vgetc(void)
   // Execute Lua on_key callbacks.
   kvi_push(on_key_buf, NUL);
   if (nlua_execute_on_key(c, on_key_buf.items)) {
+    // Keys following K_COMMAND/K_LUA/K_PASTE_START aren't normally received by
+    // vim.on_key() callbacks, so discard them along with the current key.
+    if (c == K_COMMAND) {
+      xfree(getcmdkeycmd(NUL, NULL, 0, false));
+    } else if (c == K_LUA) {
+      map_execute_lua(false, true);
+    } else if (c == K_PASTE_START) {
+      paste_repeat(0);
+    }
+    // Discard the current key.
     c = K_IGNORE;
   }
   kvi_destroy(on_key_buf);
@@ -2015,7 +2024,7 @@ static void getchar_common(typval_T *argvars, typval_T *rettv, bool allow_number
         int winnr = 1;
         // Find the window at the mouse coordinates and compute the
         // text position.
-        win_T *const win = mouse_find_win(&grid, &row, &col);
+        win_T *const win = mouse_find_win_inner(&grid, &row, &col);
         if (win == NULL) {
           return;
         }
@@ -2677,7 +2686,7 @@ static int vgetorpeek(bool advance)
 
           if (result == map_result_get) {
             // get a character: 2. from the typeahead buffer
-            c = typebuf.tb_buf[typebuf.tb_off] & 255;
+            c = typebuf.tb_buf[typebuf.tb_off];
             if (advance) {  // remove chars from tb_buf
               cmd_silent = (typebuf.tb_silent > 0);
               if (typebuf.tb_maplen > 0) {
@@ -3214,9 +3223,10 @@ char *getcmdkeycmd(int promptc, void *cookie, int indent, bool do_concat)
 /// Handle a Lua mapping: get its LuaRef from typeahead and execute it.
 ///
 /// @param may_repeat  save the LuaRef for redoing with "." later
+/// @param discard     discard the keys instead of executing the LuaRef
 ///
 /// @return  false if getting the LuaRef was aborted, true otherwise
-bool map_execute_lua(bool may_repeat)
+bool map_execute_lua(bool may_repeat, bool discard)
 {
   garray_T line_ga;
   int c1 = -1;
@@ -3242,9 +3252,9 @@ bool map_execute_lua(bool may_repeat)
 
   no_mapping--;
 
-  if (aborted) {
+  if (aborted || discard) {
     ga_clear(&line_ga);
-    return false;
+    return !aborted;
   }
 
   LuaRef ref = (LuaRef)atoi(line_ga.ga_data);

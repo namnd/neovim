@@ -128,7 +128,7 @@ end
 ---@param new_lines string[] list of strings to replace the original
 ---@return string[] The modified {lines} object
 function M.set_lines(lines, A, B, new_lines)
-  vim.deprecate('vim.lsp.util.set_lines()', 'nil', '0.12')
+  vim.deprecate('vim.lsp.util.set_lines()', nil, '0.12')
   -- 0-indexing to 1-indexing
   local i_0 = A[1] + 1
   -- If it extends past the end, truncate it to the end. This is because the
@@ -595,7 +595,7 @@ function M.rename(old_fname, new_fname, opts)
   opts = opts or {}
   local skip = not opts.overwrite or opts.ignoreIfExists
 
-  local old_fname_full = vim.uv.fs_realpath(vim.fs.normalize(old_fname, { expand_env = false }))
+  local old_fname_full = uv.fs_realpath(vim.fs.normalize(old_fname, { expand_env = false }))
   if not old_fname_full then
     vim.notify('Invalid path: ' .. old_fname, vim.log.levels.ERROR)
     return
@@ -822,21 +822,28 @@ function M.convert_signature_help_to_markdown_lines(signature_help, ft, triggers
     if type(doc) == 'string' then
       signature.documentation = { kind = 'plaintext', value = doc }
     end
+    -- Add delimiter if there is documentation to display
+    if signature.documentation.value ~= '' then
+      contents[#contents + 1] = '---'
+    end
     M.convert_input_to_markdown_lines(signature.documentation, contents)
   end
   if signature.parameters and #signature.parameters > 0 then
-    -- First check if the signature has an activeParameter. If it doesn't check if the response
-    -- had that property instead. Else just default to 0.
-    --
-    -- NOTE: Using tonumber() as a temporary workaround to handle `vim.NIL` until #34838 is merged
-    local active_parameter = math.max(
-      tonumber(signature.activeParameter) or tonumber(signature_help.activeParameter) or 0,
-      0
-    )
+    local active_parameter = signature.activeParameter or signature_help.activeParameter
 
-    -- If the activeParameter is > #parameters, then set it to the last
-    -- NOTE: this is not fully according to the spec, but a client-side interpretation
-    active_parameter = math.min(active_parameter, #signature.parameters - 1)
+    -- NOTE: We intentionally violate the LSP spec, which states that if `activeParameter`
+    -- is not provided or is out-of-bounds, it should default to 0.
+    -- Instead, we default to `nil`, as most clients do. In practice, 'no active parameter'
+    -- is better default than 'first parameter' and aligns better with user expectations.
+    -- Related discussion: https://github.com/microsoft/language-server-protocol/issues/1271
+    if
+      not active_parameter
+      or active_parameter == vim.NIL
+      or active_parameter < 0
+      or active_parameter >= #signature.parameters
+    then
+      return contents, nil
+    end
 
     local parameter = signature.parameters[active_parameter + 1]
     local parameter_label = parameter.label
@@ -862,7 +869,7 @@ function M.convert_signature_help_to_markdown_lines(signature_help, ft, triggers
           active_offset = { offset - 1, offset + #parameter_label - 1 }
           break
         end
-        offset = offset + #param.label + 1
+        offset = offset + #plabel + 1
       end
     end
     if parameter.documentation then
@@ -942,7 +949,7 @@ function M.make_floating_popup_options(width, height, opts)
     col = 1
   end
 
-  local title = (opts.border and opts.title) and opts.title or nil
+  local title = ((opts.border or vim.o.winborder ~= '') and opts.title) and opts.title or nil
   local title_pos --- @type 'left'|'center'|'right'?
 
   if title then
@@ -1097,10 +1104,39 @@ local function is_blank_line(line)
 end
 
 ---Returns true if the line corresponds to a Markdown thematic break.
+---@see https://github.github.com/gfm/#thematic-break
 ---@param line string
 ---@return boolean
 local function is_separator_line(line)
-  return line and line:match('^ ? ? ?%-%-%-+%s*$')
+  local i = 1
+  -- 1. Skip up to 3 leading spaces
+  local leading_spaces = 3
+  while i <= #line and line:byte(i) == string.byte(' ') and leading_spaces > 0 do
+    i = i + 1
+    leading_spaces = leading_spaces - 1
+  end
+  -- 2. Determine the delimiter character
+  local delimiter = line:byte(i) -- nil if i > #line
+  if
+    delimiter ~= string.byte('-')
+    and delimiter ~= string.byte('_')
+    and delimiter ~= string.byte('*')
+  then
+    return false
+  end
+  local ndelimiters = 1
+  i = i + 1
+  -- 3. Iterate until found non-whitespace or other than expected delimiter
+  while i <= #line do
+    local char = line:byte(i)
+    if char == delimiter then
+      ndelimiters = ndelimiters + 1
+    elseif not (char == string.byte(' ') or char == string.byte('\t')) then
+      return false
+    end
+    i = i + 1
+  end
+  return ndelimiters >= 3
 end
 
 ---Replaces separator lines by the given divider and removing surrounding blank lines.
@@ -1371,7 +1407,7 @@ end
 --- Normalizes Markdown input to a canonical form.
 ---
 --- The returned Markdown adheres to the GitHub Flavored Markdown (GFM)
---- specification.
+--- specification, as required by the LSP.
 ---
 --- The following transformations are made:
 ---
@@ -1382,6 +1418,7 @@ end
 ---@param contents string[]
 ---@param opts? vim.lsp.util._normalize_markdown.Opts
 ---@return string[] table of lines containing normalized Markdown
+---@see https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#markupContent
 ---@see https://github.github.com/gfm
 function M._normalize_markdown(contents, opts)
   validate('contents', contents, 'table')
@@ -1723,6 +1760,7 @@ function M.open_floating_preview(contents, syntax, opts)
 
   vim.wo[floating_winnr].foldenable = false -- Disable folding.
   vim.wo[floating_winnr].wrap = opts.wrap -- Soft wrapping.
+  vim.wo[floating_winnr].linebreak = true -- Break lines a bit nicer
   vim.wo[floating_winnr].breakindent = true -- Slightly better list presentation.
   vim.wo[floating_winnr].smoothscroll = true -- Scroll by screen-line instead of buffer-line.
 
@@ -1731,7 +1769,7 @@ function M.open_floating_preview(contents, syntax, opts)
 
   if do_stylize then
     vim.wo[floating_winnr].conceallevel = 2
-    vim.wo[floating_winnr].concealcursor = 'n'
+    vim.wo[floating_winnr].concealcursor = ''
     vim.bo[floating_bufnr].filetype = 'markdown'
     vim.treesitter.start(floating_bufnr)
     if not opts.height then
@@ -1970,7 +2008,7 @@ end
 ---@param lines string[] list of lines
 ---@return string filetype or "markdown" if it was unchanged.
 function M.try_trim_markdown_code_blocks(lines)
-  vim.deprecate('vim.lsp.util.try_trim_markdown_code_blocks()', 'nil', '0.12')
+  vim.deprecate('vim.lsp.util.try_trim_markdown_code_blocks()', nil, '0.12')
   local language_id = assert(lines[1]):match('^```(.*)')
   if language_id then
     local has_inner_code_fence = false
@@ -2289,85 +2327,6 @@ function M._cancel_requests(filter)
         and (type == nil or type == request.type)
       then
         client:cancel_request(id)
-      end
-    end
-  end
-end
-
----@param feature string
----@param client_id? integer
-local function make_enable_var(feature, client_id)
-  return ('_lsp_enabled_%s%s'):format(feature, client_id and ('_client_%d'):format(client_id) or '')
-end
-
----@class vim.lsp.enable.Filter
----@inlinedoc
----
---- Buffer number, or 0 for current buffer, or nil for all.
----@field bufnr? integer
----
---- Client ID, or nil for all
----@field client_id? integer
-
----@param feature string
----@param filter? vim.lsp.enable.Filter
-function M._is_enabled(feature, filter)
-  vim.validate('feature', feature, 'string')
-  vim.validate('filter', filter, 'table', true)
-
-  filter = filter or {}
-  local bufnr = filter.bufnr
-  local client_id = filter.client_id
-
-  local var = make_enable_var(feature)
-  local client_var = make_enable_var(feature, client_id)
-  return vim.F.if_nil(client_id and vim.g[client_var], vim.g[var])
-    and vim.F.if_nil(bufnr and vim.b[bufnr][var], vim.g[var])
-end
-
----@param feature 'semantic_tokens'
----@param enable? boolean
----@param filter? vim.lsp.enable.Filter
-function M._enable(feature, enable, filter)
-  vim.validate('feature', feature, 'string')
-  vim.validate('enable', enable, 'boolean', true)
-  vim.validate('filter', filter, 'table', true)
-
-  enable = enable == nil or enable
-  filter = filter or {}
-  local bufnr = filter.bufnr
-  local client_id = filter.client_id
-  assert(
-    not (bufnr and client_id),
-    'Only one of `bufnr` or `client_id` filters can be specified at a time.'
-  )
-
-  local var = make_enable_var(feature)
-  local client_var = make_enable_var(feature, client_id)
-
-  if client_id then
-    if enable == vim.g[var] then
-      vim.g[client_var] = nil
-    else
-      vim.g[client_var] = enable
-    end
-  elseif bufnr then
-    if enable == vim.g[var] then
-      vim.b[bufnr][var] = nil
-    else
-      vim.b[bufnr][var] = enable
-    end
-  else
-    vim.g[var] = enable
-    for _, it_bufnr in ipairs(api.nvim_list_bufs()) do
-      if api.nvim_buf_is_loaded(it_bufnr) and vim.b[it_bufnr][var] == enable then
-        vim.b[it_bufnr][var] = nil
-      end
-    end
-    for _, it_client in ipairs(vim.lsp.get_clients()) do
-      local it_client_var = make_enable_var(feature, it_client.id)
-      if vim.g[it_client_var] and vim.g[it_client_var] == enable then
-        vim.g[it_client_var] = nil
       end
     end
   end

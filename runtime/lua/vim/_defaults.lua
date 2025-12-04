@@ -219,11 +219,11 @@ do
       vim.lsp.buf.type_definition()
     end, { desc = 'vim.lsp.buf.type_definition()' })
 
-    vim.keymap.set('x', 'an', function()
+    vim.keymap.set({ 'x', 'o' }, 'an', function()
       vim.lsp.buf.selection_range(vim.v.count1)
     end, { desc = 'vim.lsp.buf.selection_range(vim.v.count1)' })
 
-    vim.keymap.set('x', 'in', function()
+    vim.keymap.set({ 'x', 'o' }, 'in', function()
       vim.lsp.buf.selection_range(-vim.v.count1)
     end, { desc = 'vim.lsp.buf.selection_range(-vim.v.count1)' })
 
@@ -405,7 +405,7 @@ do
     vim.keymap.set('n', '[<C-T>', function()
       -- count doesn't work with :ptprevious, must use range. See #30641.
       cmd({ cmd = 'ptprevious', range = { vim.v.count1 } })
-    end, { desc = ' :ptprevious' })
+    end, { desc = ':ptprevious' })
 
     vim.keymap.set('n', ']<C-T>', function()
       -- count doesn't work with :ptnext, must use range. See #30641.
@@ -580,7 +580,15 @@ do
     callback = function(args)
       if string.match(args.data.sequence, '^\027]133;A') then
         local lnum = args.data.cursor[1] ---@type integer
-        vim.api.nvim_buf_set_extmark(args.buf, nvim_terminal_prompt_ns, lnum - 1, 0, {})
+        if lnum >= 1 then
+          vim.api.nvim_buf_set_extmark(
+            args.buf,
+            nvim_terminal_prompt_ns,
+            lnum - 1,
+            0,
+            { right_gravity = false }
+          )
+        end
       end
     end,
   })
@@ -676,7 +684,7 @@ do
     end,
   })
 
-  -- Only do the following when the TUI is attached
+  -- Check if a TTY is attached
   local tty = nil
   for _, ui in ipairs(vim.api.nvim_list_uis()) do
     if ui.chan == 1 and ui.stdout_tty then
@@ -839,7 +847,7 @@ do
         end,
       })
 
-      io.stdout:write('\027]11;?\007')
+      vim.api.nvim_ui_send('\027]11;?\007')
     end
 
     --- If the TUI (term_has_truecolor) was able to determine that the host
@@ -927,7 +935,7 @@ do
         local decrqss = '\027P$qm\027\\'
 
         -- Reset attributes first, as other code may have set attributes.
-        io.stdout:write(string.format('\027[0m\027[48;2;%d;%d;%dm%s', r, g, b, decrqss))
+        vim.api.nvim_ui_send(string.format('\027[0m\027[48;2;%d;%d;%dm%s', r, g, b, decrqss))
 
         timer:start(1000, 0, function()
           -- Delete the autocommand if no response was received
@@ -974,6 +982,21 @@ do
       end
     end,
   })
+
+  if tty then
+    -- Show progress bars in supporting terminals
+    vim.api.nvim_create_autocmd('Progress', {
+      group = vim.api.nvim_create_augroup('nvim.progress', {}),
+      desc = 'Display native progress bars',
+      callback = function(ev)
+        if ev.data.status == 'running' then
+          vim.api.nvim_ui_send(string.format('\027]9;4;1;%d\027\\', ev.data.percent))
+        else
+          vim.api.nvim_ui_send('\027]9;4;0;0\027\\')
+        end
+      end,
+    })
+  end
 end
 
 --- Default options

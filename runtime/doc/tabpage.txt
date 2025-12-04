@@ -1,7 +1,7 @@
 *tabpage.txt*   Nvim
 
 
-		  VIM REFERENCE MANUAL    by Bram Moolenaar
+		  VIM REFERENCE MANUAL	  by Bram Moolenaar
 
 
 Editing with windows in multiple tab pages.		*tab-page* *tabpage*
@@ -119,7 +119,7 @@ Closing the last window of a tab page closes the tab page too, unless there is
 only one tab page.
 
 Using the mouse: If the tab page line is displayed you can click in the "X" at
-the top right to close the current tab page.  A custom |'tabline'| may show
+the top right to close the current tab page.  A custom 'tabline' may show
 something else.
 
 							*:tabc* *:tabclose*
@@ -146,7 +146,7 @@ something else.
 		    :tabclose $	    " close the last tab page
 		    :tabclose #     " close the last accessed tab page
 
-When a tab page is closed the next tab page will become the current one. This
+When a tab page is closed the next tab page will become the current one.  This
 behaviour can be customized using the 'tabclose' option.
 
 							*:tabo* *:tabonly*
@@ -182,7 +182,7 @@ SWITCHING TO ANOTHER TAB PAGE:
 
 Using the mouse: If the tab page line is displayed you can click in a tab page
 label to switch to that tab page.  Click where there is no label to go to the
-next tab page.  |'tabline'|
+next tab page.  'tabline'
 
 :tabn[ext]				*:tabn* *:tabnext* *gt*
 <C-PageDown>				*CTRL-<PageDown>* *<C-PageDown>*
@@ -275,7 +275,7 @@ REORDERING TAB PAGES:
 
 
 Note that although it is possible to move a tab page behind the N-th one by
-using :Ntabmove. And move it by N places by using :+Ntabmove. For
+using :Ntabmove.  And move it by N places by using :+Ntabmove.  For
 clarification what +N means in this context see |[range]|.
 
 

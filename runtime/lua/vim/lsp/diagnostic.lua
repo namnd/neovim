@@ -5,7 +5,6 @@
 
 local lsp = vim.lsp
 local protocol = lsp.protocol
-local ms = protocol.Methods
 local util = lsp.util
 
 local api = vim.api
@@ -223,7 +222,8 @@ end
 --- @param client_id? integer
 --- @param diagnostics lsp.Diagnostic[]
 --- @param is_pull boolean
-local function handle_diagnostics(uri, client_id, diagnostics, is_pull)
+--- @param version integer?
+local function handle_diagnostics(uri, client_id, diagnostics, is_pull, version)
   local fname = vim.uri_to_fname(uri)
 
   if #diagnostics == 0 and vim.fn.bufexists(fname) == 0 then
@@ -232,6 +232,10 @@ local function handle_diagnostics(uri, client_id, diagnostics, is_pull)
 
   local bufnr = vim.fn.bufadd(fname)
   if not bufnr then
+    return
+  end
+
+  if version and util.buf_versions[bufnr] ~= version then
     return
   end
 
@@ -250,7 +254,7 @@ end
 ---@param params lsp.PublishDiagnosticsParams
 ---@param ctx lsp.HandlerContext
 function M.on_publish_diagnostics(_, params, ctx)
-  handle_diagnostics(params.uri, ctx.client_id, params.diagnostics, false)
+  handle_diagnostics(params.uri, ctx.client_id, params.diagnostics, false, params.version)
 end
 
 --- |lsp-handler| for the method "textDocument/diagnostic"
@@ -264,7 +268,8 @@ function M.on_diagnostic(error, result, ctx)
   if error ~= nil and error.code == protocol.ErrorCodes.ServerCancelled then
     if error.data == nil or error.data.retriggerRequest ~= false then
       local client = assert(lsp.get_client_by_id(ctx.client_id))
-      client:request(ctx.method, ctx.params)
+      ---@diagnostic disable-next-line: param-type-mismatch
+      client:request(ctx.method, ctx.params, nil, ctx.bufnr)
     end
     return
   end
@@ -299,27 +304,6 @@ function M.on_diagnostic(error, result, ctx)
 
     related_bufstate.client_result_id[client_id] = related_result.resultId
   end
-end
-
---- Clear push diagnostics and diagnostic cache.
----
---- Diagnostic producers should prefer |vim.diagnostic.reset()|. However,
---- this method signature is still used internally in some parts of the LSP
---- implementation so it's simply marked @private rather than @deprecated.
----
----@param client_id integer
----@param buffer_client_map table<integer, table<integer, table>> map of buffers to active clients
----@private
-function M.reset(client_id, buffer_client_map)
-  buffer_client_map = vim.deepcopy(buffer_client_map)
-  vim.schedule(function()
-    for bufnr, client_ids in pairs(buffer_client_map) do
-      if client_ids[client_id] then
-        local namespace = M.get_namespace(client_id, false)
-        vim.diagnostic.reset(namespace, bufnr)
-      end
-    end
-  end)
 end
 
 --- Get the diagnostics by line
@@ -384,7 +368,7 @@ local function refresh(bufnr, client_id, only_visible)
     return
   end
 
-  local method = ms.textDocument_diagnostic
+  local method = 'textDocument/diagnostic'
   local clients = lsp.get_clients({ bufnr = bufnr, method = method, id = client_id })
   local bufstate = bufstates[bufnr]
 
@@ -424,8 +408,8 @@ function M._enable(bufnr)
     buffer = bufnr,
     callback = function(opts)
       if
-        opts.data.method ~= ms.textDocument_didChange
-        and opts.data.method ~= ms.textDocument_didOpen
+        opts.data.method ~= 'textDocument/didChange'
+        and opts.data.method ~= 'textDocument/didOpen'
       then
         return
       end
@@ -451,7 +435,7 @@ function M._enable(bufnr)
   api.nvim_create_autocmd('LspDetach', {
     buffer = bufnr,
     callback = function(args)
-      local clients = lsp.get_clients({ bufnr = bufnr, method = ms.textDocument_diagnostic })
+      local clients = lsp.get_clients({ bufnr = bufnr, method = 'textDocument/diagnostic' })
 
       if
         not vim.iter(clients):any(function(c)
@@ -490,7 +474,7 @@ end
 --- Request workspace-wide diagnostics.
 --- @param opts vim.lsp.WorkspaceDiagnosticsOpts
 function M._workspace_diagnostics(opts)
-  local clients = lsp.get_clients({ method = ms.workspace_diagnostic, id = opts.client_id })
+  local clients = lsp.get_clients({ method = 'workspace/diagnostic', id = opts.client_id })
 
   --- @param error lsp.ResponseError?
   --- @param result lsp.WorkspaceDiagnosticReport
@@ -498,10 +482,10 @@ function M._workspace_diagnostics(opts)
   local function handler(error, result, ctx)
     -- Check for retrigger requests on cancellation errors.
     -- Unless `retriggerRequest` is explicitly disabled, try again.
-    if error ~= nil and error.code == lsp.protocol.ErrorCodes.ServerCancelled then
+    if error ~= nil and error.code == protocol.ErrorCodes.ServerCancelled then
       if error.data == nil or error.data.retriggerRequest ~= false then
         local client = assert(lsp.get_client_by_id(ctx.client_id))
-        client:request(ms.workspace_diagnostic, ctx.params, handler)
+        client:request('workspace/diagnostic', ctx.params, handler)
       end
       return
     end
@@ -532,7 +516,7 @@ function M._workspace_diagnostics(opts)
       previousResultIds = previous_result_ids(client.id),
     }
 
-    client:request(ms.workspace_diagnostic, params, handler)
+    client:request('workspace/diagnostic', params, handler)
   end
 end
 

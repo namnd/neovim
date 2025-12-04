@@ -48,9 +48,7 @@ typedef struct {
   bool ext_widgets[kUIGlobalCount];
 } UIEventCallback;
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "ui.c.generated.h"
-#endif
+#include "ui.c.generated.h"
 
 #define MAX_UI_COUNT 16
 
@@ -118,9 +116,7 @@ static void ui_log(const char *funname)
     } \
   } while (0)
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "ui_events_call.generated.h"
-#endif
+#include "ui_events_call.generated.h"
 
 void ui_init(void)
 {
@@ -542,9 +538,7 @@ void ui_flush(void)
 
   static bool was_busy = false;
 
-  cmdline_ui_flush();
-
-  if (State != MODE_CMDLINE && curwin->w_floating && curwin->w_config.hide) {
+  if (!(State & MODE_CMDLINE) && curwin->w_floating && curwin->w_config.hide) {
     if (!was_busy) {
       ui_call_busy_start();
       was_busy = true;
@@ -555,7 +549,11 @@ void ui_flush(void)
   }
 
   win_ui_flush(false);
-  msg_ext_ui_flush();
+  // Avoid flushing callbacks expected to change text during textlock.
+  if (textlock == 0) {
+    cmdline_ui_flush();
+    msg_ext_ui_flush();
+  }
   msg_scroll_flush();
 
   if (pending_cursor_update) {

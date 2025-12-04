@@ -64,14 +64,10 @@ typedef struct {
   tabpage_T *new_curtab;
 } arg_all_state_T;
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "arglist.c.generated.h"
-#endif
+#include "arglist.c.generated.h"
 
 static const char e_window_layout_changed_unexpectedly[]
   = N_("E249: Window layout changed unexpectedly");
-static const char e_cannot_change_arglist_recursively[]
-  = N_("E1156: Cannot change the argument list recursively");
 
 enum {
   AL_SET = 1,

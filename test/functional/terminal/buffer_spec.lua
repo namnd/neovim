@@ -337,6 +337,94 @@ describe(':terminal buffer', function()
                                                         |*4
     ]])
   end)
+
+  it('reports focus notifications when requested', function()
+    feed([[<C-\><C-N>]])
+    exec_lua(function()
+      local function new_test_term()
+        local chan = vim.api.nvim_open_term(0, {
+          on_input = function(_, term, buf, data)
+            if data == '\27[I' then
+              vim.b[buf].term_focused = true
+              vim.api.nvim_chan_send(term, 'focused\n')
+            elseif data == '\27[O' then
+              vim.b[buf].term_focused = false
+              vim.api.nvim_chan_send(term, 'unfocused\n')
+            end
+          end,
+        })
+        vim.b.term_focused = false
+        vim.api.nvim_chan_send(chan, '\27[?1004h') -- Enable focus reporting
+      end
+
+      vim.cmd 'edit bar'
+      new_test_term()
+      vim.cmd 'vnew foo'
+      new_test_term()
+      vim.cmd 'vsplit'
+    end)
+    screen:expect([[
+      ^                    │              │              |
+                          │              │              |*4
+      {120:foo [-]              }{119:foo [-]        bar [-]       }|
+                                                        |
+    ]])
+
+    -- TermEnter/Leave happens *after* entering/leaving terminal mode, so focus should've changed
+    -- already by the time these events run.
+    exec_lua(function()
+      _G.last_event = nil
+      vim.api.nvim_create_autocmd({ 'TermEnter', 'TermLeave' }, {
+        callback = function(args)
+          _G.last_event = args.event
+            .. ' '
+            .. vim.fs.basename(args.file)
+            .. ' '
+            .. tostring(vim.b[args.buf].term_focused)
+        end,
+      })
+    end)
+
+    feed('i')
+    screen:expect([[
+      focused             │focused       │              |
+      ^                    │              │              |
+                          │              │              |*3
+      {120:foo [-]              }{119:foo [-]        bar [-]       }|
+      {5:-- TERMINAL --}                                    |
+    ]])
+    eq('TermEnter foo true', exec_lua('return _G.last_event'))
+
+    -- Next window has the same terminal; no new notifications.
+    command('wincmd w')
+    screen:expect([[
+      focused             │focused             │        |
+                          │^                    │        |
+                          │                    │        |*3
+      {119:foo [-]              }{120:foo [-]              }{119:bar [-] }|
+      {5:-- TERMINAL --}                                    |
+    ]])
+    -- Next window has a different terminal; expect new unfocus and focus notifications.
+    command('wincmd w')
+    screen:expect([[
+      focused             │focused │focused             |
+      unfocused           │unfocuse│^                    |
+                          │        │                    |*3
+      {119:foo [-]              foo [-]  }{120:bar [-]             }|
+      {5:-- TERMINAL --}                                    |
+    ]])
+    -- Leaving terminal mode; expect a new unfocus notification.
+    feed([[<C-\><C-N>]])
+    screen:expect([[
+      focused             │focused │focused             |
+      unfocused           │unfocuse│unfocused           |
+                          │        │^                    |
+                          │        │                    |*2
+      {119:foo [-]              foo [-]  }{120:bar [-]             }|
+                                                        |
+    ]])
+    eq('TermLeave bar false', exec_lua('return _G.last_event'))
+  end)
 end)
 
 describe(':terminal buffer', function()
@@ -467,6 +555,83 @@ describe(':terminal buffer', function()
         {5:-- TERMINAL --}                                    |
       ]])
       eq({ 22, 6 }, exec_lua('return _G.cursor'))
+
+      api.nvim_chan_send(term, '\nHello\027]133;D\027\\\nworld!\n')
+      screen:expect([[
+        >                                                 |*4
+        Hello                                             |
+        world!                                            |
+        Hello                                             |
+        world!                                            |
+        ^                                                  |
+        {5:-- TERMINAL --}                                    |
+      ]])
+      eq({ 23, 5 }, exec_lua('return _G.cursor'))
+
+      api.nvim_chan_send(term, 'Hello\027]133;D\027\\\nworld!' .. ('\n'):rep(6))
+      screen:expect([[
+        world!                                            |
+        Hello                                             |
+        world!                                            |
+                                                          |*5
+        ^                                                  |
+        {5:-- TERMINAL --}                                    |
+      ]])
+      eq({ 25, 5 }, exec_lua('return _G.cursor'))
+
+      api.nvim_set_option_value('scrollback', 10, {})
+      eq(19, api.nvim_buf_line_count(0))
+
+      api.nvim_chan_send(term, 'Hello\nworld!\027]133;D\027\\')
+      screen:expect([[
+        Hello                                             |
+        world!                                            |
+                                                          |*5
+        Hello                                             |
+        world!^                                            |
+        {5:-- TERMINAL --}                                    |
+      ]])
+      eq({ 19, 6 }, exec_lua('return _G.cursor'))
+
+      api.nvim_chan_send(term, '\nHello\027]133;D\027\\\nworld!\n')
+      screen:expect([[
+                                                          |*4
+        Hello                                             |
+        world!                                            |
+        Hello                                             |
+        world!                                            |
+        ^                                                  |
+        {5:-- TERMINAL --}                                    |
+      ]])
+      eq({ 17, 5 }, exec_lua('return _G.cursor'))
+
+      api.nvim_chan_send(term, 'Hello\027]133;D\027\\\nworld!' .. ('\n'):rep(6))
+      screen:expect([[
+        world!                                            |
+        Hello                                             |
+        world!                                            |
+                                                          |*5
+        ^                                                  |
+        {5:-- TERMINAL --}                                    |
+      ]])
+      eq({ 12, 5 }, exec_lua('return _G.cursor'))
+
+      api.nvim_chan_send(term, 'Hello\027]133;D\027\\\nworld!' .. ('\n'):rep(8))
+      screen:expect([[
+        world!                                            |
+                                                          |*7
+        ^                                                  |
+        {5:-- TERMINAL --}                                    |
+      ]])
+      eq({ 10, 5 }, exec_lua('return _G.cursor'))
+
+      api.nvim_chan_send(term, 'Hello\027]133;D\027\\\nworld!' .. ('\n'):rep(20))
+      screen:expect([[
+                                                          |*8
+        ^                                                  |
+        {5:-- TERMINAL --}                                    |
+      ]])
+      eq({ -2, 5 }, exec_lua('return _G.cursor'))
     end)
 
     it('does not cause hang in vim.wait() #32753', function()
@@ -600,6 +765,58 @@ describe(':terminal buffer', function()
       end,
       unchanged = true,
     })
+  end)
+
+  it('does not wipeout unrelated buffer after channel closes', function()
+    local screen = Screen.new(50, 7)
+    screen:set_default_attr_ids({
+      [1] = { foreground = Screen.colors.Blue1, bold = true },
+      [2] = { reverse = true },
+      [31] = { background = Screen.colors.DarkGreen, foreground = Screen.colors.White, bold = true },
+    })
+
+    local old_buf = api.nvim_get_current_buf()
+    command('new')
+    fn.chanclose(api.nvim_open_term(0, {}))
+    local term_buf = api.nvim_get_current_buf()
+    screen:expect([[
+      ^                                                  |
+      [Terminal closed]                                 |
+      {31:[Scratch] [-]                                     }|
+                                                        |
+      {1:~                                                 }|
+      {2:[No Name]                                         }|
+                                                        |
+    ]])
+
+    -- Autocommand should not result in the wrong buffer being wiped out.
+    command('autocmd TermLeave * ++once wincmd p')
+    feed('ii')
+    screen:expect([[
+      ^                                                  |
+      {1:~                                                 }|*5
+                                                        |
+    ]])
+    eq(old_buf, api.nvim_get_current_buf())
+    eq(false, api.nvim_buf_is_valid(term_buf))
+
+    term_buf = api.nvim_get_current_buf()
+    fn.chanclose(api.nvim_open_term(term_buf, {}))
+    screen:expect([[
+      ^                                                  |
+      [Terminal closed]                                 |
+                                                        |*5
+    ]])
+
+    -- Autocommand should not result in a heap UAF if it frees the terminal prematurely.
+    command('autocmd TermLeave * ++once bwipeout!')
+    feed('ii')
+    screen:expect([[
+      ^                                                  |
+      {1:~                                                 }|*5
+                                                        |
+    ]])
+    eq(false, api.nvim_buf_is_valid(term_buf))
   end)
 end)
 

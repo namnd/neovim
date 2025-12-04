@@ -44,7 +44,6 @@
 #include "nvim/digraph.h"
 #include "nvim/drawscreen.h"
 #include "nvim/errors.h"
-#include "nvim/eval.h"
 #include "nvim/eval/typval.h"
 #include "nvim/eval/vars.h"
 #include "nvim/ex_cmds.h"
@@ -58,6 +57,7 @@
 #include "nvim/file_search.h"
 #include "nvim/fileio.h"
 #include "nvim/fold.h"
+#include "nvim/fuzzy.h"
 #include "nvim/garray.h"
 #include "nvim/garray_defs.h"
 #include "nvim/getchar.h"
@@ -68,6 +68,7 @@
 #include "nvim/help.h"
 #include "nvim/indent.h"
 #include "nvim/indent_c.h"
+#include "nvim/insexpand.h"
 #include "nvim/main.h"
 #include "nvim/map_defs.h"
 #include "nvim/mapping.h"
@@ -99,7 +100,6 @@
 #include "nvim/regexp_defs.h"
 #include "nvim/runtime.h"
 #include "nvim/runtime_defs.h"
-#include "nvim/search.h"
 #include "nvim/spell.h"
 #include "nvim/state_defs.h"
 #include "nvim/statusline.h"
@@ -114,9 +114,7 @@
 #include "nvim/window.h"
 #include "nvim/winfloat.h"
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "buffer.c.generated.h"
-#endif
+#include "buffer.c.generated.h"
 
 static const char e_attempt_to_delete_buffer_that_is_in_use_str[]
   = N_("E937: Attempt to delete a buffer that is in use: %s");
@@ -130,6 +128,15 @@ typedef enum {
   kBffClearWinInfo = 1,
   kBffInitChangedtick = 2,
 } BufFreeFlags;
+
+/// Calculate the percentage that `part` is of the `whole`.
+int calc_percentage(int64_t part, int64_t whole)
+{
+  // With 32 bit longs and more than 21,474,836 lines multiplying by 100
+  // causes an overflow, thus for large numbers divide instead.
+  return (part > 1000000) ? (int)(part / (whole / 100))
+                          : (int)((part * 100) / whole);
+}
 
 /// @return  the highest possible buffer number
 int get_highest_fnum(void)
@@ -158,12 +165,12 @@ static int read_buffer(bool read_stdin, exarg_T *eap, int flags)
   if (retval == OK) {
     // Delete the binary lines.
     while (--line_count >= 0) {
-      ml_delete(1, false);
+      ml_delete(1);
     }
   } else {
     // Delete the converted lines.
     while (curbuf->b_ml.ml_line_count > line_count) {
-      ml_delete(line_count, false);
+      ml_delete(line_count);
     }
   }
   // Put the cursor on the first line.
@@ -571,7 +578,7 @@ bool close_buffer(win_T *win, buf_T *buf, int action, bool abort_if_last, bool i
     }
     buf->b_locked--;
     buf->b_locked_split--;
-    if (abort_if_last && one_window(win)) {
+    if (abort_if_last && win != NULL && one_window(win, NULL)) {
       // Autocommands made this the only window.
       emsg(_(e_auabort));
       return false;
@@ -590,7 +597,7 @@ bool close_buffer(win_T *win, buf_T *buf, int action, bool abort_if_last, bool i
       }
       buf->b_locked--;
       buf->b_locked_split--;
-      if (abort_if_last && one_window(win)) {
+      if (abort_if_last && win != NULL && one_window(win, NULL)) {
         // Autocommands made this the only window.
         emsg(_(e_auabort));
         return false;
@@ -679,14 +686,14 @@ bool close_buffer(win_T *win, buf_T *buf, int action, bool abort_if_last, bool i
     return false;
   }
 
-  // Disable buffer-updates for the current buffer.
-  // No need to check `unload_buf`: in that case the function returned above.
-  buf_updates_unload(buf, false);
-
+  bool clear_w_buf = false;
   if (win != NULL  // Avoid bogus clang warning.
       && win_valid_any_tab(win)
       && win->w_buffer == buf) {
-    win->w_buffer = NULL;  // make sure we don't use the buffer now
+    // Defer clearing w_buffer until after operations that may invoke dict
+    // watchers (e.g., buf_clear_file()), so callers like tabpagebuflist()
+    // never see a window in the winlist with a NULL buffer.
+    clear_w_buf = true;
   }
 
   // Autocommands may have opened or closed windows for this buffer.
@@ -697,6 +704,9 @@ bool close_buffer(win_T *win, buf_T *buf, int action, bool abort_if_last, bool i
 
   // Remove the buffer from the list.
   if (wipe_buf) {
+    if (clear_w_buf) {
+      win->w_buffer = NULL;
+    }
     // Do not wipe out the buffer if it is used in a window.
     if (buf->b_nwindows > 0) {
       return true;
@@ -734,6 +744,9 @@ bool close_buffer(win_T *win, buf_T *buf, int action, bool abort_if_last, bool i
       buf->b_p_initialized = false;
     }
     buf_clear_file(buf);
+    if (clear_w_buf) {
+      win->w_buffer = NULL;
+    }
     if (del_buf) {
       buf->b_p_bl = false;
     }
@@ -763,7 +776,7 @@ void buf_clear(void)
   linenr_T line_count = curbuf->b_ml.ml_line_count;
   extmark_free_all(curbuf);   // delete any extmarks
   while (!(curbuf->b_ml.ml_flags & ML_EMPTY)) {
-    ml_delete(1, false);
+    ml_delete(1);
   }
   deleted_lines_mark(1, line_count);  // prepare for display
 }
@@ -789,6 +802,11 @@ void buf_freeall(buf_T *buf, int flags)
   bufref_T bufref;
   set_bufref(&bufref, buf);
 
+  buf_updates_unload(buf, false);
+  if (!bufref_valid(&bufref)) {
+    // on_detach callback deleted the buffer.
+    return;
+  }
   if ((buf->b_ml.ml_mfp != NULL)
       && apply_autocmds(EVENT_BUFUNLOAD, buf->b_fname, buf->b_fname, false, buf)
       && !bufref_valid(&bufref)) {
@@ -936,7 +954,7 @@ static void free_buffer_stuff(buf_T *buf, int free_flags)
   map_clear_mode(buf, MAP_ALL_MODES, true, true);   // clear local abbrevs
   XFREE_CLEAR(buf->b_start_fenc);
 
-  buf_updates_unload(buf, false);
+  buf_free_callbacks(buf);
 }
 
 /// Go to another buffer.  Handles the result of the ATTENTION dialog.
@@ -1256,8 +1274,11 @@ static int do_buffer_ext(int action, int start, int dir, int count, int flags)
       buf = buf->b_next;
     }
   } else {
+    const bool help_only = (flags & DOBUF_SKIPHELP) != 0 && buf->b_help;
+
     bp = NULL;
-    while (count > 0 || (!unload && !buf->b_p_bl && bp != buf)) {
+    while (count > 0 || (bp != buf && !unload
+                         && !(help_only ? buf->b_help : buf->b_p_bl))) {
       // remember the buffer where we start, we come back there when all
       // buffers are unlisted.
       if (bp == NULL) {
@@ -1265,12 +1286,13 @@ static int do_buffer_ext(int action, int start, int dir, int count, int flags)
       }
       buf = dir == FORWARD ? (buf->b_next != NULL ? buf->b_next : firstbuf)
                            : (buf->b_prev != NULL ? buf->b_prev : lastbuf);
+      // Avoid non-help buffers if the starting point was a help buffer
+      // and vice-versa.
       // Don't count unlisted buffers.
-      // Avoid non-help buffers if the starting point was a non-help buffer and
-      // vice-versa.
       if (unload
-          || (buf->b_p_bl
-              && ((flags & DOBUF_SKIPHELP) == 0 || buf->b_help == bp->b_help))) {
+          || (help_only
+              ? buf->b_help
+              : (buf->b_p_bl && ((flags & DOBUF_SKIPHELP) == 0 || !buf->b_help)))) {
         count--;
         bp = NULL;              // use this buffer as new starting point
       }
@@ -2093,13 +2115,14 @@ void free_buf_options(buf_T *buf, bool free_p_ff)
   clear_string_option(&buf->b_p_cinw);
   clear_string_option(&buf->b_p_cot);
   clear_string_option(&buf->b_p_cpt);
-  clear_string_option(&buf->b_p_ise);
   clear_string_option(&buf->b_p_cfu);
   callback_free(&buf->b_cfu_cb);
   clear_string_option(&buf->b_p_ofu);
   callback_free(&buf->b_ofu_cb);
   clear_string_option(&buf->b_p_tsrfu);
   callback_free(&buf->b_tsrfu_cb);
+  clear_cpt_callbacks(&buf->b_p_cpt_cb, buf->b_p_cpt_count);
+  buf->b_p_cpt_count = 0;
   clear_string_option(&buf->b_p_gefm);
   clear_string_option(&buf->b_p_gp);
   clear_string_option(&buf->b_p_mp);
@@ -2116,6 +2139,7 @@ void free_buf_options(buf_T *buf, bool free_p_ff)
   clear_string_option(&buf->b_p_dia);
   clear_string_option(&buf->b_p_tsr);
   clear_string_option(&buf->b_p_qe);
+  buf->b_p_ac = -1;
   buf->b_p_ar = -1;
   buf->b_p_ul = NO_LOCAL_UNDOLEVEL;
   clear_string_option(&buf->b_p_lw);
@@ -2470,12 +2494,12 @@ int ExpandBufnames(char *pat, int *num_file, char ***file, int options)
       } else {
         p = NULL;
         // first try matching with the short file name
-        if ((score = fuzzy_match_str(buf->b_sfname, pat)) != 0) {
+        if ((score = fuzzy_match_str(buf->b_sfname, pat)) != FUZZY_SCORE_NONE) {
           p = buf->b_sfname;
         }
         if (p == NULL) {
           // next try matching with the full path file name
-          if ((score = fuzzy_match_str(buf->b_ffname, pat)) != 0) {
+          if ((score = fuzzy_match_str(buf->b_ffname, pat)) != FUZZY_SCORE_NONE) {
             p = buf->b_ffname;
           }
         }
@@ -2865,8 +2889,9 @@ void buflist_list(exarg_T *eap)
             && (buf == curbuf || curwin->w_alt_fnum != buf->b_fnum))) {
       continue;
     }
-    if (buf_spname(buf) != NULL) {
-      xstrlcpy(NameBuff, buf_spname(buf), MAXPATHL);
+    char *name = buf_spname(buf);
+    if (name != NULL) {
+      xstrlcpy(NameBuff, name, MAXPATHL);
     } else {
       home_replace(buf, buf->b_fname, NameBuff, MAXPATHL, true);
     }
@@ -2884,14 +2909,18 @@ void buflist_list(exarg_T *eap)
     }
 
     msg_putchar('\n');
-    int len = vim_snprintf(IObuff, IOSIZE - 20, "%3d%c%c%c%c%c \"%s\"",
-                           buf->b_fnum,
-                           buf->b_p_bl ? ' ' : 'u',
-                           buf == curbuf ? '%' : (curwin->w_alt_fnum == buf->b_fnum ? '#' : ' '),
-                           buf->b_ml.ml_mfp == NULL ? ' ' : (buf->b_nwindows == 0 ? 'h' : 'a'),
-                           ro_char,
-                           changed_char,
-                           NameBuff);
+    int len = (int)vim_snprintf_safelen(IObuff, IOSIZE - 20, "%3d%c%c%c%c%c \"%s\"",
+                                        buf->b_fnum,
+                                        buf->b_p_bl ? ' ' : 'u',
+                                        buf == curbuf ? '%'
+                                                      : (curwin->w_alt_fnum
+                                                         == buf->b_fnum ? '#' : ' '),
+                                        buf->b_ml.ml_mfp == NULL ? ' '
+                                                                 : (buf->b_nwindows
+                                                                    == 0 ? 'h' : 'a'),
+                                        ro_char,
+                                        changed_char,
+                                        NameBuff);
 
     len = MIN(len, IOSIZE - 20);
 
@@ -3207,87 +3236,85 @@ static bool buf_same_file_id(buf_T *buf, FileID *file_id)
 /// @param fullname  when non-zero print full path
 void fileinfo(int fullname, int shorthelp, bool dont_truncate)
 {
-  char *p;
-
   char *buffer = xmalloc(IOSIZE);
+  size_t bufferlen = 0;
 
   if (fullname > 1) {       // 2 CTRL-G: include buffer number
-    vim_snprintf(buffer, IOSIZE, "buf %d: ", curbuf->b_fnum);
-    p = buffer + strlen(buffer);
-  } else {
-    p = buffer;
+    bufferlen = vim_snprintf_safelen(buffer, IOSIZE, "buf %d: ", curbuf->b_fnum);
   }
 
-  *p++ = '"';
-  if (buf_spname(curbuf) != NULL) {
-    xstrlcpy(p, buf_spname(curbuf), (size_t)(IOSIZE - (p - buffer)));
+  buffer[bufferlen++] = '"';
+
+  char *name = buf_spname(curbuf);
+  if (name != NULL) {
+    bufferlen += vim_snprintf_safelen(buffer + bufferlen,
+                                      IOSIZE - bufferlen, "%s", name);
   } else {
-    char *name = (!fullname && curbuf->b_fname != NULL)
-                 ? curbuf->b_fname
-                 : curbuf->b_ffname;
-    home_replace(shorthelp ? curbuf : NULL, name, p,
-                 (size_t)(IOSIZE - (p - buffer)), true);
+    name = (!fullname && curbuf->b_fname != NULL) ? curbuf->b_fname : curbuf->b_ffname;
+    home_replace(shorthelp ? curbuf : NULL, name, buffer + bufferlen,
+                 IOSIZE - bufferlen, true);
+    bufferlen += strlen(buffer + bufferlen);
   }
 
   bool dontwrite = bt_dontwrite(curbuf);
-  vim_snprintf_add(buffer, IOSIZE, "\"%s%s%s%s%s%s",
-                   curbufIsChanged()
-                   ? (shortmess(SHM_MOD) ? " [+]" : _(" [Modified]")) : " ",
-                   (curbuf->b_flags & BF_NOTEDITED) && !dontwrite
-                   ? _("[Not edited]") : "",
-                   (curbuf->b_flags & BF_NEW) && !dontwrite
-                   ? _("[New]") : "",
-                   (curbuf->b_flags & BF_READERR)
-                   ? _("[Read errors]") : "",
-                   curbuf->b_p_ro
-                   ? (shortmess(SHM_RO) ? _("[RO]") : _("[readonly]")) : "",
-                   (curbufIsChanged()
-                    || (curbuf->b_flags & BF_WRITE_MASK)
-                    || curbuf->b_p_ro)
-                   ? " " : "");
-  int n;
-  // With 32 bit longs and more than 21,474,836 lines multiplying by 100
-  // causes an overflow, thus for large numbers divide instead.
-  if (curwin->w_cursor.lnum > 1000000) {
-    n = ((curwin->w_cursor.lnum) /
-         (curbuf->b_ml.ml_line_count / 100));
-  } else {
-    n = ((curwin->w_cursor.lnum * 100) /
-         curbuf->b_ml.ml_line_count);
-  }
+  bufferlen += vim_snprintf_safelen(buffer + bufferlen,
+                                    IOSIZE - bufferlen,
+                                    "\"%s%s%s%s%s%s",
+                                    curbufIsChanged()
+                                    ? (shortmess(SHM_MOD) ? " [+]" : _(" [Modified]"))
+                                    : " ",
+                                    (curbuf->b_flags & BF_NOTEDITED) && !dontwrite
+                                    ? _("[Not edited]") : "",
+                                    (curbuf->b_flags & BF_NEW) && !dontwrite
+                                    ? _("[New]") : "",
+                                    (curbuf->b_flags & BF_READERR)
+                                    ? _("[Read errors]") : "",
+                                    curbuf->b_p_ro
+                                    ? (shortmess(SHM_RO) ? _("[RO]") : _("[readonly]"))
+                                    : "",
+                                    (curbufIsChanged()
+                                     || (curbuf->b_flags & BF_WRITE_MASK)
+                                     || curbuf->b_p_ro)
+                                    ? " " : "");
+
   if (curbuf->b_ml.ml_flags & ML_EMPTY) {
-    vim_snprintf_add(buffer, IOSIZE, "%s", _(no_lines_msg));
+    bufferlen += vim_snprintf_safelen(buffer + bufferlen,
+                                      IOSIZE - bufferlen, "%s", _(no_lines_msg));
   } else if (p_ru) {
     // Current line and column are already on the screen -- webb
-    vim_snprintf_add(buffer, IOSIZE,
-                     NGETTEXT("%" PRId64 " line --%d%%--",
-                              "%" PRId64 " lines --%d%%--",
-                              curbuf->b_ml.ml_line_count),
-                     (int64_t)curbuf->b_ml.ml_line_count, n);
+    bufferlen += vim_snprintf_safelen(buffer + bufferlen,
+                                      IOSIZE - bufferlen,
+                                      NGETTEXT("%" PRId64 " line --%d%%--",
+                                               "%" PRId64 " lines --%d%%--",
+                                               curbuf->b_ml.ml_line_count),
+                                      (int64_t)curbuf->b_ml.ml_line_count,
+                                      calc_percentage(curwin->w_cursor.lnum,
+                                                      curbuf->b_ml.ml_line_count));
   } else {
-    vim_snprintf_add(buffer, IOSIZE,
-                     _("line %" PRId64 " of %" PRId64 " --%d%%-- col "),
-                     (int64_t)curwin->w_cursor.lnum,
-                     (int64_t)curbuf->b_ml.ml_line_count,
-                     n);
+    bufferlen += vim_snprintf_safelen(buffer + bufferlen,
+                                      IOSIZE - bufferlen,
+                                      _("line %" PRId64 " of %" PRId64 " --%d%%-- col "),
+                                      (int64_t)curwin->w_cursor.lnum,
+                                      (int64_t)curbuf->b_ml.ml_line_count,
+                                      calc_percentage(curwin->w_cursor.lnum,
+                                                      curbuf->b_ml.ml_line_count));
     validate_virtcol(curwin);
-    size_t len = strlen(buffer);
-    (void)col_print(buffer + len, IOSIZE - len,
-                    (int)curwin->w_cursor.col + 1, (int)curwin->w_virtcol + 1);
+    bufferlen += (size_t)col_print(buffer + bufferlen, IOSIZE - bufferlen,
+                                   curwin->w_cursor.col + 1, curwin->w_virtcol + 1);
   }
 
-  append_arg_number(curwin, buffer, IOSIZE);
+  append_arg_number(curwin, buffer + bufferlen, IOSIZE - bufferlen);
 
   if (dont_truncate) {
     // Temporarily set msg_scroll to avoid the message being truncated.
     // First call msg_start() to get the message in the right place.
     msg_start();
-    n = msg_scroll;
+    int n = msg_scroll;
     msg_scroll = true;
     msg(buffer, 0);
     msg_scroll = n;
   } else {
-    p = msg_trunc(buffer, false, 0);
+    char *p = msg_trunc(buffer, false, 0);
     if (restart_edit != 0 || (msg_scrolled && !need_wait_return)) {
       // Need to repeat the message after redrawing when:
       // - When restart_edit is set (otherwise there will be a delay
@@ -3304,10 +3331,10 @@ void fileinfo(int fullname, int shorthelp, bool dont_truncate)
 int col_print(char *buf, size_t buflen, int col, int vcol)
 {
   if (col == vcol) {
-    return vim_snprintf(buf, buflen, "%d", col);
+    return (int)vim_snprintf_safelen(buf, buflen, "%d", col);
   }
 
-  return vim_snprintf(buf, buflen, "%d-%d", col, vcol);
+  return (int)vim_snprintf_safelen(buf, buflen, "%d-%d", col, vcol);
 }
 
 static char *lasttitle = NULL;
@@ -3318,7 +3345,6 @@ void maketitle(void)
 {
   char *title_str = NULL;
   char *icon_str = NULL;
-  int maxlen = 0;
   char buf[IOSIZE];
 
   if (!redrawing()) {
@@ -3333,6 +3359,8 @@ void maketitle(void)
   }
 
   if (p_title) {
+    int maxlen = 0;
+
     if (p_titlelen > 0) {
       maxlen = MAX((int)(p_titlelen * Columns / 100), 10);
     }
@@ -3365,19 +3393,19 @@ void maketitle(void)
         icon_str = p_iconstring;
       }
     } else {
-      char *buf_p = buf_spname(curbuf) != NULL
-                    ? buf_spname(curbuf)
-                    : path_tail(curbuf->b_ffname);  // use file name only in icon
-      *icon_str = NUL;
-      // Truncate name at 100 bytes.
-      int len = (int)strlen(buf_p);
-      if (len > 100) {
-        len -= 100;
-        len += utf_cp_bounds(buf_p, buf_p + len).end_off;
-        buf_p += len;
+      char *name = buf_spname(curbuf);
+      if (name == NULL) {
+        name = path_tail(curbuf->b_ffname);
       }
-      STRCPY(icon_str, buf_p);
-      trans_characters(icon_str, IOSIZE);
+      // Truncate name at 100 bytes.
+      int namelen = (int)strlen(name);
+      if (namelen > 100) {
+        namelen -= 100;
+        namelen += utf_cp_bounds(name, name + namelen).end_off;
+        name += namelen;
+      }
+      STRCPY(buf, name);
+      trans_characters(buf, sizeof(buf));
     }
   }
 
@@ -3429,7 +3457,7 @@ void free_titles(void)
 
 #endif
 
-/// Get relative cursor position in window into "buf[buflen]", in the localized
+/// Get relative cursor position in window into "buf[]", in the localized
 /// percentage form like %99, 99%; using "Top", "Bot" or "All" when appropriate.
 int get_rel_pos(win_T *wp, char *buf, int buflen)
 {
@@ -3440,7 +3468,6 @@ int get_rel_pos(win_T *wp, char *buf, int buflen)
 
   linenr_T above;          // number of lines above window
   linenr_T below;          // number of lines below window
-  int len;
 
   above = wp->w_topline - 1;
   above += win_get_fill(wp, wp->w_topline) - wp->w_topfill;
@@ -3451,46 +3478,40 @@ int get_rel_pos(win_T *wp, char *buf, int buflen)
   }
   below = wp->w_buffer->b_ml.ml_line_count - wp->w_botline + 1;
   if (below <= 0) {
-    len = vim_snprintf(buf, (size_t)buflen, "%s", (above == 0) ? _("All") : _("Bot"));
-  } else if (above <= 0) {
-    len = vim_snprintf(buf, (size_t)buflen, "%s", _("Top"));
-  } else {
-    int perc = (above > 1000000
-                ? (above / ((above + below) / 100))
-                : (above * 100 / (above + below)));
-    // localized percentage value
-    len = vim_snprintf(buf, (size_t)buflen, _("%s%d%%"), (perc < 10) ? " " : "", perc);
-  }
-  if (len < 0) {
-    buf[0] = NUL;
-    len = 0;
-  } else if (len > buflen - 1) {
-    len = buflen - 1;
+    return (int)vim_snprintf_safelen(buf, (size_t)buflen,
+                                     "%s", (above == 0) ? _("All") : _("Bot"));
   }
 
-  return len;
+  if (above <= 0) {
+    return (int)vim_snprintf_safelen(buf, (size_t)buflen,
+                                     "%s", _("Top"));
+  }
+
+  int perc = calc_percentage(above, above + below);
+  char tmp[8];
+  // localized percentage value
+  vim_snprintf(tmp, sizeof(tmp), _("%d%%"), perc);
+  return (int)vim_snprintf_safelen(buf, (size_t)buflen, _("%3s"), tmp);
 }
 
-/// Append (2 of 8) to "buf[buflen]", if editing more than one file.
+/// Append (2 of 8) to "buf[]", if editing more than one file.
 ///
 /// @param          wp        window whose buffers to check
 /// @param[in,out]  buf       string buffer to add the text to
 /// @param          buflen    length of the string buffer
 ///
-/// @return  true if it was appended.
-bool append_arg_number(win_T *wp, char *buf, int buflen)
+/// @return  the number of characters appended.
+int append_arg_number(win_T *wp, char *buf, size_t buflen)
   FUNC_ATTR_NONNULL_ALL
 {
   // Nothing to do
   if (ARGCOUNT <= 1) {
-    return false;
+    return 0;
   }
 
   const char *msg = wp->w_arg_idx_invalid ? _(" ((%d) of %d)") : _(" (%d of %d)");
 
-  char *p = buf + strlen(buf);  // go to the end of the buffer
-  vim_snprintf(p, (size_t)(buflen - (p - buf)), msg, wp->w_arg_idx + 1, ARGCOUNT);
-  return true;
+  return (int)vim_snprintf_safelen(buf, buflen, msg, wp->w_arg_idx + 1, ARGCOUNT);
 }
 
 /// Make "*ffname" a full file name, set "*sfname" to "*ffname" if not NULL.
@@ -3755,13 +3776,13 @@ void do_modelines(int flags)
 /// @param flags  Same as for do_modelines().
 static int chk_modeline(linenr_T lnum, int flags)
 {
-  char *s;
   char *e;
-  intmax_t vers;
   int retval = OK;
 
   int prev = -1;
-  for (s = ml_get(lnum); *s != NUL; s++) {
+  char *s = ml_get(lnum);
+  char *line_end = s + ml_get_len(lnum);
+  for (; *s != NUL; s++) {
     if (prev == -1 || ascii_isspace(prev)) {
       if ((prev != -1 && strncmp(s, "ex:", 3) == 0)
           || strncmp(s, "vi:", 3) == 0) {
@@ -3774,18 +3795,20 @@ static int chk_modeline(linenr_T lnum, int flags)
         } else {
           e = s + 3;
         }
+        intmax_t vers;
         if (!try_getdigits(&e, &vers)) {
           continue;
         }
 
+        const int vim_version = min_vim_version();
         if (*e == ':'
             && (s[0] != 'V'
                 || strncmp(skipwhite(e + 1), "set", 3) == 0)
             && (s[3] == ':'
-                || (VIM_VERSION_100 >= vers && isdigit((uint8_t)s[3]))
-                || (VIM_VERSION_100 < vers && s[3] == '<')
-                || (VIM_VERSION_100 > vers && s[3] == '>')
-                || (VIM_VERSION_100 == vers && s[3] == '='))) {
+                || (vim_version >= vers && isdigit((uint8_t)s[3]))
+                || (vim_version < vers && s[3] == '<')
+                || (vim_version > vers && s[3] == '>')
+                || (vim_version == vers && s[3] == '='))) {
           break;
         }
       }
@@ -3801,8 +3824,12 @@ static int chk_modeline(linenr_T lnum, int flags)
     s++;
   } while (s[-1] != ':');
 
-  char *linecopy;                 // local copy of any modeline found
-  s = linecopy = xstrdup(s);      // copy the line, it will change
+  size_t len = (size_t)(line_end - s);  // remember the line length so we can restore
+                                        // 'line_end' after the copy
+  char *linecopy;  // local copy of any modeline found
+  s = linecopy = xstrnsave(s, len);     // copy the line, it will change
+
+  line_end = s + len;                   // restore 'line_end'
 
   // prepare for emsg()
   estack_push(ETYPE_MODELINE, "modelines", lnum);
@@ -3818,7 +3845,8 @@ static int chk_modeline(linenr_T lnum, int flags)
     // Skip over "\:", replacing it with ":".
     for (e = s; *e != ':' && *e != NUL; e++) {
       if (e[0] == '\\' && e[1] == ':') {
-        STRMOVE(e, e + 1);
+        memmove(e, e + 1, (size_t)(line_end - (e + 1)) + 1);    // +1 for NUL
+        line_end--;
       }
     }
     if (*e == NUL) {
@@ -3836,7 +3864,7 @@ static int chk_modeline(linenr_T lnum, int flags)
         break;
       }
       end = true;
-      s = vim_strchr(s, ' ') + 1;
+      s += (*(s + 2) == ' ') ? 3 : 4;
     }
     *e = NUL;                         // truncate the set command
 
@@ -3857,7 +3885,8 @@ static int chk_modeline(linenr_T lnum, int flags)
         break;
       }
     }
-    s = e + 1;                        // advance to next part
+    s = (e == line_end) ? e : e + 1;  // advance to next part
+                                      // careful not to go off the end
   }
 
   estack_pop();
@@ -4160,10 +4189,12 @@ void buf_set_changedtick(buf_T *const buf, const varnumber_T changedtick)
   buf->changedtick_di.di_tv.vval.v_number = changedtick;
 
   if (tv_dict_is_watched(buf->b_vars)) {
+    buf->b_locked++;
     tv_dict_watcher_notify(buf->b_vars,
                            (char *)buf->changedtick_di.di_key,
                            &buf->changedtick_di.di_tv,
                            &old_val);
+    buf->b_locked--;
   }
 }
 

@@ -264,7 +264,7 @@ M.cmds = {
   },
   {
     command = 'breaklist',
-    flags = bit.bor(EXTRA, TRLBAR, CMDWIN, LOCK_OK),
+    flags = bit.bor(TRLBAR, CMDWIN, LOCK_OK),
     addr_type = 'ADDR_NONE',
     func = 'ex_breaklist',
   },
@@ -629,6 +629,12 @@ M.cmds = {
     flags = bit.bor(NEEDARG, EXTRA, NOTRLCOM, CMDWIN, LOCK_OK),
     addr_type = 'ADDR_NONE',
     func = 'ex_wrongmodifier',
+  },
+  {
+    command = 'connect',
+    flags = bit.bor(BANG, WORD1, NOTRLCOM, NEEDARG),
+    addr_type = 'ADDR_NONE',
+    func = 'ex_connect',
   },
   {
     command = 'const',
@@ -3181,7 +3187,7 @@ M.cmds = {
   },
   {
     command = 'wall',
-    flags = bit.bor(BANG, TRLBAR, CMDWIN, LOCK_OK),
+    flags = bit.bor(BANG, TRLBAR, CMDWIN, LOCK_OK, ARGOPT),
     addr_type = 'ADDR_NONE',
     func = 'do_wqall',
   },

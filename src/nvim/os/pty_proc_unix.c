@@ -13,7 +13,7 @@
 // forkpty is not in POSIX, so headers are platform-specific
 #if defined(__FreeBSD__) || defined(__DragonFly__)
 # include <libutil.h>
-// TODO(bfredl): this is avaliable on darwin, but there is an issue with cross-compile headers
+// TODO(bfredl): this is available on darwin, but there is an issue with cross-compile headers
 #elif defined(__APPLE__) && !defined(HAVE_FORKPTY)
 int forkpty(int *, char *, const struct termios *, const struct winsize *);
 #elif defined(__OpenBSD__) || defined(__NetBSD__) || defined(__APPLE__)
@@ -45,19 +45,22 @@ int forkpty(int *, char *, const struct termios *, const struct winsize *);
 #include "nvim/os/pty_proc_unix.h"
 #include "nvim/types_defs.h"
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "os/pty_proc_unix.c.generated.h"
-#endif
+#include "os/pty_proc_unix.c.generated.h"
 
-#if defined(__sun) && !defined(HAVE_FORKPTY)
+#if !defined(HAVE_FORKPTY) && !defined(__APPLE__)
 
 // this header defines STR, just as nvim.h, but it is defined as ('S'<<8),
 // to avoid #undef STR, #undef STR, #define STR ('S'<<8) just delay the
 // inclusion of the header even though it gets include out of order.
-# include <sys/stropts.h>
 
-static int openpty(int *amaster, int *aslave, char *name, struct termios *termp,
-                   struct winsize *winp)
+# if !defined(__HAIKU__)
+#  include <sys/stropts.h>
+# else
+#  define I_PUSH 0  // XXX: find the actual value
+# endif
+
+static int vim_openpty(int *amaster, int *aslave, char *name, struct termios *termp,
+                       struct winsize *winp)
 {
   int slave = -1;
   int master = open("/dev/ptmx", O_RDWR);
@@ -117,7 +120,7 @@ error:
   return -1;
 }
 
-static int login_tty(int fd)
+static int vim_login_tty(int fd)
 {
   setsid();
   if (ioctl(fd, TIOCSCTTY, NULL) == -1) {
@@ -134,10 +137,10 @@ static int login_tty(int fd)
   return 0;
 }
 
-static pid_t forkpty(int *amaster, char *name, struct termios *termp, struct winsize *winp)
+pid_t vim_forkpty(int *amaster, char *name, struct termios *termp, struct winsize *winp)
 {
   int master, slave;
-  if (openpty(&master, &slave, name, termp, winp) == -1) {
+  if (vim_openpty(&master, &slave, name, termp, winp) == -1) {
     return -1;
   }
 
@@ -149,7 +152,7 @@ static pid_t forkpty(int *amaster, char *name, struct termios *termp, struct win
     return -1;
   case 0:
     close(master);
-    login_tty(slave);
+    vim_login_tty(slave);
     return 0;
   default:
     close(slave);
@@ -157,7 +160,7 @@ static pid_t forkpty(int *amaster, char *name, struct termios *termp, struct win
     return pid;
   }
 }
-
+# define forkpty vim_forkpty
 #endif
 
 /// @returns zero on success, or negative error code
@@ -346,9 +349,11 @@ static void init_termios(struct termios *termios) FUNC_ATTR_NONNULL_ALL
   termios->c_cc[VSTART] = 0x1f & 'Q';
   termios->c_cc[VSTOP] = 0x1f & 'S';
   termios->c_cc[VSUSP] = 0x1f & 'Z';
+#if !defined(__HAIKU__)
   termios->c_cc[VREPRINT] = 0x1f & 'R';
   termios->c_cc[VWERASE] = 0x1f & 'W';
   termios->c_cc[VLNEXT] = 0x1f & 'V';
+#endif
   termios->c_cc[VMIN] = 1;
   termios->c_cc[VTIME] = 0;
 }

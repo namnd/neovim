@@ -13,6 +13,7 @@
 
 #include "auto/config.h"
 #include "nvim/api/private/defs.h"
+#include "nvim/api/private/dispatch.h"
 #include "nvim/api/private/helpers.h"
 #include "nvim/api/ui.h"
 #include "nvim/api/vimscript.h"
@@ -25,6 +26,7 @@
 #include "nvim/change.h"
 #include "nvim/channel.h"
 #include "nvim/charset.h"
+#include "nvim/clipboard.h"
 #include "nvim/cmdexpand.h"
 #include "nvim/cmdexpand_defs.h"
 #include "nvim/cursor.h"
@@ -33,10 +35,11 @@
 #include "nvim/drawscreen.h"
 #include "nvim/edit.h"
 #include "nvim/errors.h"
-#include "nvim/eval.h"
+#include "nvim/eval/fs.h"
 #include "nvim/eval/typval.h"
 #include "nvim/eval/typval_defs.h"
 #include "nvim/eval/userfunc.h"
+#include "nvim/eval/vars.h"
 #include "nvim/event/loop.h"
 #include "nvim/event/multiqueue.h"
 #include "nvim/ex_cmds.h"
@@ -72,7 +75,6 @@
 #include "nvim/move.h"
 #include "nvim/normal.h"
 #include "nvim/normal_defs.h"
-#include "nvim/ops.h"
 #include "nvim/option.h"
 #include "nvim/option_defs.h"
 #include "nvim/option_vars.h"
@@ -168,14 +170,10 @@ struct dbg_stuff {
   except_T *current_exception;
 };
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "ex_docmd.c.generated.h"
-#endif
+#include "ex_docmd.c.generated.h"
 
 // Declare cmdnames[].
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "ex_cmds_defs.generated.h"
-#endif
+#include "ex_cmds_defs.generated.h"
 
 static char dollar_command[2] = { '$', 0 };
 
@@ -407,8 +405,7 @@ int do_cmdline(char *cmdline, LineGetter fgetline, void *cookie, int flags)
   bool msg_didout_before_start = false;
   int count = 0;                        // line number count
   bool did_inc = false;                 // incremented RedrawingDisabled
-  int block_indent = -1;                // indent for ext_cmdline block event
-  char *block_line = NULL;              // block_line for ext_cmdline block event
+  bool did_block = false;               // emitted cmdline_block event
   int retval = OK;
   cstack_T cstack = {                   // conditional stack
     .cs_idx = -1,
@@ -577,18 +574,18 @@ int do_cmdline(char *cmdline, LineGetter fgetline, void *cookie, int flags)
     // 2. If no line given, get an allocated line with fgetline().
     if (next_cmdline == NULL) {
       int indent = cstack.cs_idx < 0 ? 0 : (cstack.cs_idx + 1) * 2;
-      if (count >= 1 && getline_equal(fgetline, cookie, getexline)) {
+
+      if (count == 1 && getline_equal(fgetline, cookie, getexline)) {
         if (ui_has(kUICmdline)) {
-          char *line = block_line == last_cmdline ? "" : last_cmdline;
-          ui_ext_cmdline_block_append((size_t)MAX(0, block_indent), line);
-          block_line = last_cmdline;
-          block_indent = indent;
-        } else if (count == 1) {
-          // Need to set msg_didout for the first line after an ":if",
-          // otherwise the ":if" will be overwritten.
-          msg_didout = true;
+          // Emit cmdline_block event for loop/conditional block.
+          ui_ext_cmdline_block_append(0, last_cmdline);
+          did_block = true;
         }
+        // Need to set msg_didout for the first line after an ":if",
+        // otherwise the ":if" will be overwritten.
+        msg_didout = true;
       }
+
       if (fgetline == NULL || (next_cmdline = fgetline(':', cookie, indent, true)) == NULL) {
         // Don't call wait_return() for aborted command line.  The NULL
         // returned for the end of a sourced file or executed function
@@ -600,6 +597,12 @@ int do_cmdline(char *cmdline, LineGetter fgetline, void *cookie, int flags)
         break;
       }
       used_getline = true;
+
+      // Emit all but the first cmdline_block event immediately; waiting until after
+      // command execution would mess up event ordering with nested command lines.
+      if (ui_has(kUICmdline) && count > 0 && getline_equal(fgetline, cookie, getexline)) {
+        ui_ext_cmdline_block_append((size_t)indent, next_cmdline);
+      }
 
       // Keep the first typed line.  Clear it when more lines are typed.
       if (flags & DOCMD_KEEPLINE) {
@@ -945,7 +948,7 @@ int do_cmdline(char *cmdline, LineGetter fgetline, void *cookie, int flags)
     }
   }
 
-  if (block_indent >= 0) {
+  if (did_block) {
     ui_ext_cmdline_block_leave();
   }
 
@@ -1479,6 +1482,43 @@ bool is_cmd_ni(cmdidx_T cmdidx)
                                      || cmdnames[cmdidx].cmd_func == ex_script_ni);
 }
 
+// Find the command name after skipping range specifiers.
+static char *find_excmd_after_range(exarg_T *eap)
+{
+  // Save location after command modifiers.
+  char *cmd = eap->cmd;
+  eap->cmd = skip_range(eap->cmd, NULL);
+  if (*eap->cmd == '*') {
+    eap->cmd = skipwhite(eap->cmd + 1);
+  }
+  char *p = find_ex_command(eap, NULL);
+  eap->cmd = cmd;  // Restore original position for address parsing
+  return p;
+}
+
+// Set the forceit flag based on the presence of '!' after the command.
+static bool parse_bang(const exarg_T *eap, char **p)
+{
+  if (**p == '!'
+      && eap->cmdidx != CMD_substitute
+      && eap->cmdidx != CMD_smagic
+      && eap->cmdidx != CMD_snomagic) {
+    (*p)++;
+    return true;
+  }
+  return false;
+}
+
+/// Check if command expects expression arguments that need special parsing
+bool cmd_has_expr_args(cmdidx_T cmdidx)
+{
+  return cmdidx == CMD_execute
+         || cmdidx == CMD_echo
+         || cmdidx == CMD_echon
+         || cmdidx == CMD_echomsg
+         || cmdidx == CMD_echoerr;
+}
+
 /// Parse command line and return information about the first command.
 /// If parsing is done successfully, need to free cmod_filter_pat and cmod_filter_regmatch.regprog
 /// after calling, usually done using undo_cmdmod() or execute_cmd().
@@ -1489,7 +1529,7 @@ bool is_cmd_ni(cmdidx_T cmdidx)
 /// @param[out] errormsg Error message, if any
 ///
 /// @return Success or failure
-bool parse_cmdline(char *cmdline, exarg_T *eap, CmdParseInfo *cmdinfo, const char **errormsg)
+bool parse_cmdline(char **cmdline, exarg_T *eap, CmdParseInfo *cmdinfo, const char **errormsg)
 {
   char *after_modifier = NULL;
   bool retval = false;
@@ -1507,8 +1547,8 @@ bool parse_cmdline(char *cmdline, exarg_T *eap, CmdParseInfo *cmdinfo, const cha
   *eap = (exarg_T){
     .line1 = 1,
     .line2 = 1,
-    .cmd = cmdline,
-    .cmdlinep = &cmdline,
+    .cmd = *cmdline,
+    .cmdlinep = cmdline,
     .ea_getline = NULL,
     .cookie = NULL,
   };
@@ -1519,14 +1559,8 @@ bool parse_cmdline(char *cmdline, exarg_T *eap, CmdParseInfo *cmdinfo, const cha
   }
   after_modifier = eap->cmd;
 
-  // Save location after command modifiers
-  char *cmd = eap->cmd;
-  // Skip ranges to find command name since we need the command to know what kind of range it uses
-  eap->cmd = skip_range(eap->cmd, NULL);
-  if (*eap->cmd == '*') {
-    eap->cmd = skipwhite(eap->cmd + 1);
-  }
-  char *p = find_ex_command(eap, NULL);
+  // We need the command name to know what kind of range it uses.
+  char *p = find_excmd_after_range(eap);
   if (p == NULL) {
     *errormsg = _(e_ambiguous_use_of_user_defined_command);
     goto end;
@@ -1534,7 +1568,6 @@ bool parse_cmdline(char *cmdline, exarg_T *eap, CmdParseInfo *cmdinfo, const cha
 
   // Set command address type and parse command range
   set_cmd_addr_type(eap, p);
-  eap->cmd = cmd;
   if (parse_cmd_address(eap, errormsg, true) == FAIL) {
     goto end;
   }
@@ -1549,20 +1582,14 @@ bool parse_cmdline(char *cmdline, exarg_T *eap, CmdParseInfo *cmdinfo, const cha
   if (eap->cmdidx == CMD_SIZE) {
     xstrlcpy(IObuff, _(e_not_an_editor_command), IOSIZE);
     // If the modifier was parsed OK the error must be in the following command
-    char *cmdname = after_modifier ? after_modifier : cmdline;
+    char *cmdname = after_modifier ? after_modifier : *cmdline;
     append_command(cmdname);
     *errormsg = IObuff;
     goto end;
   }
 
   // Correctly set 'forceit' for commands
-  if (*p == '!' && eap->cmdidx != CMD_substitute
-      && eap->cmdidx != CMD_smagic && eap->cmdidx != CMD_snomagic) {
-    p++;
-    eap->forceit = true;
-  } else {
-    eap->forceit = false;
-  }
+  eap->forceit = parse_bang(eap, &p);
 
   // Parse arguments.
   if (!IS_USER_CMDIDX(eap->cmdidx)) {
@@ -1570,23 +1597,33 @@ bool parse_cmdline(char *cmdline, exarg_T *eap, CmdParseInfo *cmdinfo, const cha
   }
   // Skip to start of argument.
   // Don't do this for the ":!" command, because ":!! -l" needs the space.
-  if (eap->cmdidx == CMD_bang) {
-    eap->arg = p;
-  } else {
-    eap->arg = skipwhite(p);
-  }
+  eap->arg = eap->cmdidx == CMD_bang ? p : skipwhite(p);
 
   // Don't treat ":r! filter" like a bang
-  if (eap->cmdidx == CMD_read) {
-    if (eap->forceit) {
-      eap->forceit = false;                     // :r! filter
-    }
+  if (eap->cmdidx == CMD_read && eap->forceit) {
+    eap->forceit = false;  // :r! filter
   }
 
   // Check for '|' to separate commands and '"' to start comments.
   // Don't do this for ":read !cmd" and ":write !cmd".
   if ((eap->argt & EX_TRLBAR)) {
     separate_nextcmd(eap);
+  } else if (cmd_has_expr_args(eap->cmdidx)) {
+    // For commands without EX_TRLBAR, check for '|' separator
+    // by skipping over expressions (including string literals)
+    char *arg = eap->arg;
+    while (*arg != NUL && *arg != '|' && *arg != '\n') {
+      char *start = arg;
+      skip_expr(&arg, NULL);
+      // If skip_expr didn't advance, move forward to avoid infinite loop
+      if (arg == start) {
+        arg++;
+      }
+    }
+    if (*arg == '|' || *arg == '\n') {
+      eap->nextcmd = check_nextcmd(arg);
+      *arg = NUL;
+    }
   }
   // Fail if command doesn't support bang but is used with a bang
   if (!(eap->argt & EX_BANG) && eap->forceit) {
@@ -1942,7 +1979,6 @@ static bool skip_cmd(const exarg_T *eap)
     case CMD_throw:
     case CMD_tilde:
     case CMD_topleft:
-    case CMD_trust:
     case CMD_unlet:
     case CMD_unlockvar:
     case CMD_verbose:
@@ -2032,13 +2068,7 @@ static char *do_one_cmd(char **cmdlinep, int flags, cstack_T *cstack, LineGetter
   // 3. Skip over the range to find the command. Let "p" point to after it.
   //
   // We need the command to know what kind of range it uses.
-  char *cmd = ea.cmd;
-  ea.cmd = skip_range(ea.cmd, NULL);
-  if (*ea.cmd == '*') {
-    ea.cmd = skipwhite(ea.cmd + 1);
-  }
-  char *p = find_ex_command(&ea, NULL);
-
+  char *p = find_excmd_after_range(&ea);
   profile_cmd(&ea, cstack, fgetline, cookie);
 
   if (!exiting) {
@@ -2067,7 +2097,6 @@ static char *do_one_cmd(char **cmdlinep, int flags, cstack_T *cstack, LineGetter
   // is equal to the lower.
   set_cmd_addr_type(&ea, p);
 
-  ea.cmd = cmd;
   if (parse_cmd_address(&ea, &errormsg, false) == FAIL) {
     goto doend;
   }
@@ -2098,13 +2127,13 @@ static char *do_one_cmd(char **cmdlinep, int flags, cstack_T *cstack, LineGetter
   if (p != NULL && ea.cmdidx == CMD_SIZE && !ea.skip
       && ASCII_ISUPPER(*ea.cmd)
       && has_event(EVENT_CMDUNDEFINED)) {
-    p = ea.cmd;
-    while (ASCII_ISALNUM(*p)) {
-      p++;
+    char *cmdname = ea.cmd;
+    while (ASCII_ISALNUM(*cmdname)) {
+      cmdname++;
     }
-    p = xmemdupz(ea.cmd, (size_t)(p - ea.cmd));
-    int ret = apply_autocmds(EVENT_CMDUNDEFINED, p, p, true, NULL);
-    xfree(p);
+    cmdname = xmemdupz(ea.cmd, (size_t)(cmdname - ea.cmd));
+    int ret = apply_autocmds(EVENT_CMDUNDEFINED, cmdname, cmdname, true, NULL);
+    xfree(cmdname);
     // If the autocommands did something and didn't cause an error, try
     // finding the command again.
     p = (ret && !aborting()) ? find_ex_command(&ea, NULL) : ea.cmd;
@@ -2137,14 +2166,8 @@ static char *do_one_cmd(char **cmdlinep, int flags, cstack_T *cstack, LineGetter
   // set when Not Implemented
   const int ni = is_cmd_ni(ea.cmdidx);
 
-  // Forced commands.
-  ea.forceit = *p == '!'
-               && ea.cmdidx != CMD_substitute
-               && ea.cmdidx != CMD_smagic
-               && ea.cmdidx != CMD_snomagic;
-  if (ea.forceit) {
-    p++;
-  }
+  // Determine if command has forceit flag ('!')
+  ea.forceit = parse_bang(&ea, &p);
 
   // 6. Parse arguments.  Then check for errors.
   if (!IS_USER_CMDIDX(ea.cmdidx)) {
@@ -3025,13 +3048,16 @@ static void append_command(const char *cmd)
 }
 
 /// Return true and set "*idx" if "p" points to a one letter command.
-/// - The 'k' command can directly be followed by any character.
+/// - The 'k' command can directly be followed by any character
+///          but :keepa[lt] is another command, as are :keepj[umps],
+///          :kee[pmarks] and :keepp[atterns].
 /// - The 's' command can be followed directly by 'c', 'g', 'i', 'I' or 'r'
 ///          but :sre[wind] is another command, as are :scr[iptnames],
 ///          :scs[cope], :sim[alt], :sig[ns] and :sil[ent].
 static int one_letter_cmd(const char *p, cmdidx_T *idx)
 {
-  if (*p == 'k') {
+  if (p[0] == 'k'
+      && (p[1] != 'e' || (p[1] == 'e' && p[2] != 'e'))) {
     *idx = CMD_k;
     return true;
   }
@@ -3064,6 +3090,9 @@ char *find_ex_command(exarg_T *eap, int *full)
   char *p = eap->cmd;
   if (one_letter_cmd(p, &eap->cmdidx)) {
     p++;
+    if (full != NULL) {
+      *full = true;
+    }
   } else {
     while (ASCII_ISALPHA(*p)) {
       p++;
@@ -4876,13 +4905,20 @@ static void ex_restart(exarg_T *eap)
     });
     set_vim_var_list(VV_ARGV, argv_cpy);
   }
-  char *quit_cmd = (eap->do_ecmd_cmd) ? eap->do_ecmd_cmd : "qall!";
-  Error err = ERROR_INIT;
-  if ((cmdmod.cmod_flags & CMOD_CONFIRM) && check_changed_any(false, false)) {
-    return;
+
+  char *quit_cmd = (eap->do_ecmd_cmd) ? eap->do_ecmd_cmd : "qall";
+  char *quit_cmd_copy = NULL;
+
+  // Prepend "confirm " to cmd if :confirm is used
+  if (cmdmod.cmod_flags & CMOD_CONFIRM) {
+    quit_cmd_copy = concat_str("confirm ", quit_cmd);
+    quit_cmd = quit_cmd_copy;
   }
+
+  Error err = ERROR_INIT;
   restarting = true;
   nvim_command(cstr_as_string(quit_cmd), &err);
+  xfree(quit_cmd_copy);
   if (ERROR_SET(&err)) {
     emsg(err.msg);  // Could not exit
     api_clear_error(&err);
@@ -5577,7 +5613,7 @@ static void ex_tabs(exarg_T *eap)
     FOR_ALL_WINDOWS_IN_TAB(wp, tp) {
       if (got_int) {
         break;
-      } else if (!wp->w_config.focusable) {
+      } else if (!wp->w_config.focusable || wp->w_config.hide) {
         continue;
       }
 
@@ -5644,6 +5680,32 @@ static void ex_detach(exarg_T *eap)
     // assert(!find_channel(chan->id));
 
     ILOG("detach current_ui=%" PRId64, chan->id);
+  }
+}
+
+/// ":connect"
+///
+/// Connects the current UI to a different server
+///
+/// ":connect <address>" detaches the current UI and connects to the given server.
+/// ":connect! <address>" stops the current server if no other UIs are attached, then connects to the given server.
+static void ex_connect(exarg_T *eap)
+{
+  bool stop_server = eap->forceit ? (ui_active() == 1) : false;
+
+  Error err = ERROR_INIT;
+  remote_ui_connect(current_ui, eap->arg, &err);
+
+  if (ERROR_SET(&err)) {
+    emsg(err.msg);
+    api_clear_error(&err);
+    return;
+  }
+
+  ex_detach(NULL);
+  if (stop_server) {
+    exiting = true;
+    getout(0);
   }
 }
 
@@ -5990,7 +6052,7 @@ static void ex_read(exarg_T *eap)
         lnum = 1;
       }
       if (*ml_get(lnum) == NUL && u_savedel(lnum, 1) == OK) {
-        ml_delete(lnum, false);
+        ml_delete(lnum);
         if (curwin->w_cursor.lnum > 1
             && curwin->w_cursor.lnum >= lnum) {
           curwin->w_cursor.lnum--;
@@ -7039,21 +7101,26 @@ void exec_normal_cmd(char *cmd, int remap, bool silent)
 {
   // Stuff the argument into the typeahead buffer.
   ins_typebuf(cmd, remap, 0, true, silent);
-  exec_normal(false);
+  exec_normal(false, false);
 }
 
 /// Execute normal_cmd() until there is no typeahead left.
 ///
 /// @param was_typed whether or not something was typed
-void exec_normal(bool was_typed)
+/// @param use_vpeekc  true to use vpeekc() to check for available chars
+void exec_normal(bool was_typed, bool use_vpeekc)
 {
   oparg_T oa;
+  int c;
 
+  // When calling vpeekc() from feedkeys() it will return Ctrl_C when there
+  // is nothing to get, so also check for Ctrl_C.
   clear_oparg(&oa);
   finish_op = false;
   while ((!stuff_empty()
           || ((was_typed || !typebuf_typed())
-              && typebuf.tb_len > 0))
+              && typebuf.tb_len > 0)
+          || (use_vpeekc && (c = vpeekc()) != NUL && c != Ctrl_C))
          && !got_int) {
     update_topline_cursor();
     normal_cmd(&oa, true);      // execute a Normal mode cmd
@@ -7064,7 +7131,7 @@ static void ex_checkpath(exarg_T *eap)
 {
   find_pattern_in_path(NULL, 0, 0, false, false, CHECK_PATH, 1,
                        eap->forceit ? ACTION_SHOW_ALL : ACTION_SHOW,
-                       1, (linenr_T)MAXLNUM, eap->forceit);
+                       1, (linenr_T)MAXLNUM, eap->forceit, false);
 }
 
 /// ":psearch"
@@ -7122,8 +7189,8 @@ static void ex_findpat(exarg_T *eap)
   }
   if (!eap->skip) {
     find_pattern_in_path(eap->arg, 0, strlen(eap->arg), whole, !eap->forceit,
-                         *eap->cmd == 'd' ? FIND_DEFINE : FIND_ANY,
-                         n, action, eap->line1, eap->line2, eap->forceit);
+                         *eap->cmd == 'd' ? FIND_DEFINE : FIND_ANY, n, action,
+                         eap->line1, eap->line2, eap->forceit, false);
   }
 }
 
@@ -7322,7 +7389,7 @@ ssize_t find_cmdline_var(const char *src, size_t *usedlen)
 char *eval_vars(char *src, const char *srcstart, size_t *usedlen, linenr_T *lnump,
                 const char **errormsg, int *escaped, bool empty_is_error)
 {
-  char *result;
+  char *result = "";
   char *resultbuf = NULL;
   size_t resultlen;
   int valid = VALID_HEAD | VALID_PATH;  // Assume valid result.
@@ -7538,7 +7605,6 @@ char *eval_vars(char *src, const char *srcstart, size_t *usedlen, linenr_T *lnum
     default:
       // should not happen
       *errormsg = "";
-      result = "";    // avoid gcc warning
       break;
     }
 

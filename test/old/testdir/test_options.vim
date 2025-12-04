@@ -108,9 +108,9 @@ func Test_options_command()
 
   " Check if the option-window is opened horizontally.
   wincmd j
-  call assert_notequal('option-window', bufname(''))
+  call assert_notequal('nvim-optwin://optwin', bufname(''))
   wincmd k
-  call assert_equal('option-window', bufname(''))
+  call assert_equal('nvim-optwin://optwin', bufname(''))
   " close option-window
   close
 
@@ -118,9 +118,9 @@ func Test_options_command()
   vert options
   " Check if the option-window is opened vertically.
   wincmd l
-  call assert_notequal('option-window', bufname(''))
+  call assert_notequal('nvim-optwin://optwin', bufname(''))
   wincmd h
-  call assert_equal('option-window', bufname(''))
+  call assert_equal('nvim-optwin://optwin', bufname(''))
   " close option-window
   close
 
@@ -141,16 +141,16 @@ func Test_options_command()
   tab options
   " Check if the option-window is opened in a tab.
   normal gT
-  call assert_notequal('option-window', bufname(''))
+  call assert_notequal('nvim-optwin://optwin', bufname(''))
   normal gt
-  call assert_equal('option-window', bufname(''))
+  call assert_equal('nvim-optwin://optwin', bufname(''))
   " close option-window
   close
 
   " Open the options window browse
   if has('browse')
     browse set
-    call assert_equal('option-window', bufname(''))
+    call assert_equal('nvim-optwin://optwin', bufname(''))
     close
   endif
 endfunc
@@ -176,7 +176,7 @@ func Test_signcolumn()
   call assert_equal("auto", &signcolumn)
   set signcolumn=yes
   set signcolumn=no
-  call assert_fails('set signcolumn=nope')
+  call assert_fails('set signcolumn=nope', 'E474: Invalid argument: signcolumn=nope')
 endfunc
 
 func Test_filetype_valid()
@@ -276,25 +276,31 @@ func Test_complete()
   new
   call feedkeys("i\<C-N>\<Esc>", 'xt')
   bwipe!
-  call assert_fails('set complete=ix', 'E535:')
-  call assert_fails('set complete=x', 'E539:')
-  call assert_fails('set complete=..', 'E535:')
+  call assert_fails('set complete=ix', 'E535: Illegal character after <i>')
+  call assert_fails('set complete=x', 'E539: Illegal character <x>')
+  call assert_fails('set complete=..', 'E535: Illegal character after <.>')
   set complete=.,w,b,u,k,\ s,i,d,],t,U,F,o
-  call assert_fails('set complete=i^-10', 'E535:')
-  call assert_fails('set complete=i^x', 'E535:')
-  call assert_fails('set complete=k^2,t^-1,s^', 'E535:')
-  call assert_fails('set complete=t^-1', 'E535:')
-  call assert_fails('set complete=kfoo^foo2', 'E535:')
-  call assert_fails('set complete=kfoo^', 'E535:')
-  call assert_fails('set complete=.^', 'E535:')
+  call assert_fails('set complete=i^-10', 'E535: Illegal character after <^>')
+  call assert_fails('set complete=i^x', 'E535: Illegal character after <^>')
+  call assert_fails('set complete=k^2,t^-1,s^', 'E535: Illegal character after <^>')
+  call assert_fails('set complete=t^-1', 'E535: Illegal character after <^>')
+  call assert_fails('set complete=kfoo^foo2', 'E535: Illegal character after <^>')
+  call assert_fails('set complete=kfoo^', 'E535: Illegal character after <^>')
+  call assert_fails('set complete=.^', 'E535: Illegal character after <^>')
   set complete=.,w,b,u,k,s,i,d,],t,U,F,o
   set complete=.
   set complete=.^10,t^0
-  set complete+=Ffuncref('foo'\\,\ [10])
-  set complete=Ffuncref('foo'\\,\ [10])^10
+
+  func Foo(a, b)
+    return ''
+  endfunc
+
+  set complete+=Ffuncref('Foo'\\,\ [10])
+  set complete=Ffuncref('Foo'\\,\ [10])^10
   set complete&
-  set complete+=Ffunction('g:foo'\\,\ [10\\,\ 20])
+  set complete+=Ffunction('g:Foo'\\,\ [10\\,\ 20])
   set complete&
+  delfunc Foo
 endfun
 
 func Test_set_completion()
@@ -537,7 +543,7 @@ func Test_set_completion_string_values()
   endif
   call assert_equal('.', getcompletion('set complete=', 'cmdline')[1])
   call assert_equal('menu', getcompletion('set completeopt=', 'cmdline')[1])
-  call assert_equal('keyword', getcompletion('set completefuzzycollect=', 'cmdline')[0])
+  " call assert_equal('keyword', getcompletion('set completefuzzycollect=', 'cmdline')[0])
   if exists('+completeslash')
     call assert_equal('backslash', getcompletion('set completeslash=', 'cmdline')[1])
   endif
@@ -2895,6 +2901,18 @@ func Test_set_missing_options()
   set w300=23
   set w1200=23
   set w9600=23
+endfunc
+
+func Test_showcmd()
+  throw 'Skipped: Nvim does not support support Vi-compatible mode'
+  " in no-cp mode, 'showcmd' is enabled
+  let _cp=&cp
+  call assert_equal(1, &showcmd)
+  set cp
+  call assert_equal(0, &showcmd)
+  set nocp
+  call assert_equal(1, &showcmd)
+  let &cp = _cp
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

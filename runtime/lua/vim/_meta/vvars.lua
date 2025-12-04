@@ -14,7 +14,8 @@ vim.v.argv = ...
 
 --- Argument for evaluating 'formatexpr' and used for the typed
 --- character when using <expr> in an abbreviation `:map-<expr>`.
---- It is also used by the `InsertCharPre` and `InsertEnter` events.
+--- It is also used by the `InsertCharPre`, `InsertEnter`,
+--- `CmdlineLeave` and `CmdlineLeavePre` events.
 --- @type string
 vim.v.char = ...
 
@@ -116,7 +117,7 @@ vim.v.dying = ...
 --- @type integer
 vim.v.echospace = ...
 
---- Last given error message.
+--- Last error message that occurred (not neccessarily displayed).
 --- Modifiable (can be set).
 --- Example:
 ---
@@ -232,7 +233,7 @@ vim.v.exiting = ...
 --- `json_encode()`.  This value is converted to "v:false" when used
 --- as a String (e.g. in `expr5` with string concatenation
 --- operator) and to zero when used as a Number (e.g. in `expr5`
---- or `expr7` when used with numeric operators). Read-only.
+--- or `expr7` when used with numeric operators).  Read-only.
 --- @type boolean
 vim.v['false'] = ...
 
@@ -328,7 +329,7 @@ vim.v.foldlevel = ...
 vim.v.foldstart = ...
 
 --- Variable that indicates whether search highlighting is on.
---- Setting it makes sense only if 'hlsearch' is enabled. Setting
+--- Setting it makes sense only if 'hlsearch' is enabled.  Setting
 --- this variable to zero acts like the `:nohlsearch` command,
 --- setting it to one acts like
 ---
@@ -428,7 +429,7 @@ vim.v.msgpack_types = ...
 --- See `json_encode()`.  This value is converted to "v:null" when
 --- used as a String (e.g. in `expr5` with string concatenation
 --- operator) and to zero when used as a Number (e.g. in `expr5`
---- or `expr7` when used with numeric operators). Read-only.
+--- or `expr7` when used with numeric operators).  Read-only.
 --- In some places `v:null` can be used for a List, Dict, etc.
 --- that is not set.  That is slightly different than an empty
 --- List, Dict, etc.
@@ -478,7 +479,7 @@ vim.v.oldfiles = ...
 --- @type string
 vim.v.operator = ...
 
---- Command used to set the option. Valid while executing an
+--- Command used to set the option.  Valid while executing an
 --- `OptionSet` autocommand.
 ---   value        option was set via ~
 ---   "setlocal"   `:setlocal` or `:let l:xxx`
@@ -488,30 +489,30 @@ vim.v.operator = ...
 --- @type string
 vim.v.option_command = ...
 
---- New value of the option. Valid while executing an `OptionSet`
+--- New value of the option.  Valid while executing an `OptionSet`
 --- autocommand.
 --- @type any
 vim.v.option_new = ...
 
---- Old value of the option. Valid while executing an `OptionSet`
---- autocommand. Depending on the command used for setting and the
---- kind of option this is either the local old value or the
+--- Old value of the option.  Valid while executing an `OptionSet`
+--- autocommand.  Depending on the command used for setting and
+--- the kind of option this is either the local old value or the
 --- global old value.
 --- @type any
 vim.v.option_old = ...
 
---- Old global value of the option. Valid while executing an
+--- Old global value of the option.  Valid while executing an
 --- `OptionSet` autocommand.
 --- @type any
 vim.v.option_oldglobal = ...
 
---- Old local value of the option. Valid while executing an
+--- Old local value of the option.  Valid while executing an
 --- `OptionSet` autocommand.
 --- @type any
 vim.v.option_oldlocal = ...
 
---- Scope of the set command. Valid while executing an
---- `OptionSet` autocommand. Can be either "global" or "local"
+--- Scope of the set command.  Valid while executing an
+--- `OptionSet` autocommand.  Can be either "global" or "local"
 --- @type string
 vim.v.option_type = ...
 
@@ -751,7 +752,7 @@ vim.v.throwpoint = ...
 --- `json_encode()`.  This value is converted to "v:true" when used
 --- as a String (e.g. in `expr5` with string concatenation
 --- operator) and to one when used as a Number (e.g. in `expr5` or
---- `expr7` when used with numeric operators). Read-only.
+--- `expr7` when used with numeric operators).  Read-only.
 --- @type boolean
 vim.v['true'] = ...
 
@@ -791,6 +792,12 @@ vim.v.versionlong = ...
 --- Read-only.
 --- @type integer
 vim.v.vim_did_enter = ...
+
+--- 0 during initialization, 1 after sourcing `vimrc` and just
+--- before `load-plugins`.
+--- Read-only.
+--- @type integer
+vim.v.vim_did_init = ...
 
 --- Virtual line number for the 'statuscolumn' expression.
 --- Negative when drawing the status column for virtual lines, zero

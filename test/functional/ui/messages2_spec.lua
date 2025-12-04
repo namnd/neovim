@@ -1,5 +1,6 @@
 -- Tests for (protocol-driven) ui2, intended to replace the legacy message grid UI.
 
+local t = require('test.testutil')
 local n = require('test.functional.testnvim')()
 local Screen = require('test.functional.ui.screen')
 
@@ -17,13 +18,24 @@ describe('messages2', function()
       require('vim._extui').enable({})
     end)
   end)
+  after_each(function()
+    -- Since vim._extui lasts until Nvim exits, there may be unfinished timers.
+    -- Close unfinished timers to avoid 2s delay on exit with ASAN or TSAN.
+    exec_lua(function()
+      vim.uv.walk(function(handle)
+        if not handle:is_closing() then
+          handle:close()
+        end
+      end)
+    end)
+  end)
 
   it('multiline messages and pager', function()
     command('echo "foo\nbar"')
     screen:expect([[
       ^                                                     |
       {1:~                                                    }|*10
-      {3:─────────────────────────────────────────────────────}|
+      {3:                                                     }|
       foo                                                  |
       bar                                                  |
     ]])
@@ -32,7 +44,7 @@ describe('messages2', function()
     screen:expect([[
                                                            |
       {1:~                                                    }|*9
-      {3:─────────────────────────────────────────────────────}|
+      {3:                                                     }|
       fo^o                                                  |
       bar                                                  |
                                           1,3           All|
@@ -42,7 +54,7 @@ describe('messages2', function()
     screen:expect([[
       ^                                                     |
       {1:~                                                    }|*5
-      {3:─────────────────────────────────────────────────────}|
+      {3:                                                     }|
       foo                                                  |
       bar                                                  |
       baz                                                  |
@@ -71,7 +83,7 @@ describe('messages2', function()
     screen:expect([[
       ^                                                     |
       {1:~                                                    }|*8
-      {3:─────────────────────────────────────────────────────}|
+      {3:                                                     }|
       foo                                                  |
       bar                                                  |
                                                            |
@@ -103,7 +115,7 @@ describe('messages2', function()
     screen:expect([[
                                                            |
       {1:~                                                    }|*10
-      {3:─────────────────────────────────────────────────────}|
+      {3:                                                     }|
       fo^o                                                  |
       foo                                                  |
     ]])
@@ -183,7 +195,7 @@ describe('messages2', function()
     screen:expect([[
       ^                                                     |
       {1:~                                                    }|*4
-      {3:─────────────────────────────────────────────────────}|
+      {3:                                                     }|
       foo                                                  |
       bar                                                  |*5
       bar [+8]                                             |
@@ -223,7 +235,7 @@ describe('messages2', function()
     screen:expect([[
       ^                                                     |
       {1:~                                                    }|*10
-      {3:─────────────────────────────────────────────────────}|
+      {3:                                                     }|
       foo                                                  |
       bar                                                  |
     ]])
@@ -232,6 +244,227 @@ describe('messages2', function()
       ^                                                     |
       {1:~                                                    }|*12
       foo [+1]                                             |
+    ]])
+  end)
+
+  it('not restoring already open hit-enter-prompt config #35298', function()
+    command('echo "foo\nbar"')
+    screen:expect([[
+      ^                                                     |
+      {1:~                                                    }|*10
+      {3:                                                     }|
+      foo                                                  |
+      bar                                                  |
+    ]])
+    command('echo "foo\nbar"')
+    screen:expect_unchanged()
+    feed(':')
+    screen:expect([[
+                                                           |
+      {1:~                                                    }|*12
+      {16::}^                                                    |
+    ]])
+  end)
+
+  it('paging prompt dialog #35191', function()
+    screen:try_resize(71, screen._height)
+    local top = [[
+                                                                             |
+      {1:~                                                                      }|*4
+      {3:                                                                       }|
+      0                                                                      |
+      1                                                                      |
+      2                                                                      |
+      3                                                                      |
+      4                                                                      |
+      5                                                                      |
+      6 [+93]                                                                |
+      Type number and <Enter> or click with the mouse (q or empty cancels): ^ |
+    ]]
+    feed(':call inputlist(range(100))<CR>')
+    screen:expect(top)
+    feed('j')
+    screen:expect([[
+                                                                             |
+      {1:~                                                                      }|*4
+      {3:                                                                       }|
+      1 [+1]                                                                 |
+      2                                                                      |
+      3                                                                      |
+      4                                                                      |
+      5                                                                      |
+      6                                                                      |
+      7 [+92]                                                                |
+      Type number and <Enter> or click with the mouse (q or empty cancels): ^ |
+    ]])
+    feed('k')
+    screen:expect(top)
+    feed('d')
+    screen:expect([[
+                                                                             |
+      {1:~                                                                      }|*4
+      {3:                                                                       }|
+      3 [+3]                                                                 |
+      4                                                                      |
+      5                                                                      |
+      6                                                                      |
+      7                                                                      |
+      8                                                                      |
+      9 [+90]                                                                |
+      Type number and <Enter> or click with the mouse (q or empty cancels): ^ |
+    ]])
+    feed('u')
+    screen:expect(top)
+    feed('f')
+    screen:expect([[
+                                                                             |
+      {1:~                                                                      }|*4
+      {3:                                                                       }|
+      5 [+5]                                                                 |
+      6                                                                      |
+      7                                                                      |
+      8                                                                      |
+      9                                                                      |
+      10                                                                     |
+      11 [+88]                                                               |
+      Type number and <Enter> or click with the mouse (q or empty cancels): ^ |
+    ]])
+    feed('b')
+    screen:expect(top)
+    feed('G')
+    screen:expect([[
+                                                                             |
+      {1:~                                                                      }|*4
+      {3:                                                                       }|
+      93 [+93]                                                               |
+      94                                                                     |
+      95                                                                     |
+      96                                                                     |
+      97                                                                     |
+      98                                                                     |
+      99                                                                     |
+      Type number and <Enter> or click with the mouse (q or empty cancels): ^ |
+    ]])
+    -- No scrolling beyond end of buffer #36114
+    feed('f')
+    screen:expect([[
+                                                                             |
+      {1:~                                                                      }|*3
+      {3:                                                                       }|
+      93 [+93]                                                               |
+      94                                                                     |
+      95                                                                     |
+      96                                                                     |
+      97                                                                     |
+      98                                                                     |
+      99                                                                     |
+      Type number and <Enter> or click with the mouse (q or empty cancels): f|
+      ^                                                                       |
+    ]])
+    feed('<Backspace>g')
+    screen:expect(top)
+  end)
+
+  it('in cmdline_block mode', function()
+    feed(':if 1<CR>')
+    screen:expect([[
+                                                           |
+      {1:~                                                    }|*11
+      {16::}{15:if} {26:1}                                                |
+      {16::}  ^                                                  |
+    ]])
+    feed([[echo input("foo\nbar:")<CR>]])
+    screen:expect([[
+                                                           |
+      {1:~                                                    }|*9
+      :if 1                                                |
+      :  echo input("foo\nbar:")                           |
+      foo                                                  |
+      bar:^                                                 |
+    ]])
+    feed('baz<CR>')
+    screen:expect([[
+                                                           |
+      {1:~                                                    }|*9
+      {16::}{15:if} {26:1}                                                |
+      {16::}  {15:echo} {25:input}{16:(}{26:"foo\nbar:"}{16:)}                           |
+      {15:baz}                                                  |
+      {16::}  ^                                                  |
+    ]])
+    feed([[echo input("foo\nbar:")<CR>]])
+    screen:expect([[
+                                                           |
+      {1:~                                                    }|*7
+      :if 1                                                |
+      :  echo input("foo\nbar:")                           |
+      baz                                                  |
+      :  echo input("foo\nbar:")                           |
+      foo                                                  |
+      bar:^                                                 |
+    ]])
+    feed('<Esc>:endif')
+    screen:expect([[
+                                                           |
+      {1:~                                                    }|*8
+      {16::}{15:if} {26:1}                                                |
+      {16::}  {15:echo} {25:input}{16:(}{26:"foo\nbar:"}{16:)}                           |
+      {15:baz}                                                  |
+      {16::}  {15:echo} {25:input}{16:(}{26:"foo\nbar:"}{16:)}                           |
+      {16::}  {16::}{15:endif}^                                            |
+    ]])
+    feed('<CR>')
+    screen:expect([[
+      ^                                                     |
+      {1:~                                                    }|*12
+                                                           |
+    ]])
+  end)
+
+  it('FileType is fired after default options are set', function()
+    n.exec([[
+      let g:set = {}
+      au FileType pager set nowrap
+      au OptionSet * let g:set[expand('<amatch>')] = g:set->get(expand('<amatch>'), 0) + 1
+      echom 'foo'->repeat(&columns)
+      messages
+    ]])
+    screen:expect([[
+                                                           |
+      {1:~                                                    }|*9
+      {3:                                                     }|
+      ^foofoofoofoofoofoofoofoofoofoofoofoofoofoofoofoofoofo|
+      {1:                                                     }|
+                                                           |
+    ]])
+    t.eq({ filetype = 4 }, n.eval('g:set')) -- still fires for 'filetype'
+  end)
+
+  it('Search highlights only apply to pager', function()
+    screen:add_extra_attr_ids({
+      [100] = { background = Screen.colors.Blue1, foreground = Screen.colors.Red },
+      [101] = { background = Screen.colors.Red1, foreground = Screen.colors.Blue1 },
+    })
+    command('hi MsgArea guifg=Red guibg=Blue')
+    command('hi Search guifg=Blue guibg=Red')
+    command('set hlsearch shortmess+=s')
+    feed('/foo<CR>')
+    screen:expect([[
+      ^                                                     |
+      {1:~                                                    }|*12
+      {9:E486: Pattern not found: foo}{100:                         }|
+    ]])
+    command('set cmdheight=0 | echo "foo"')
+    screen:expect([[
+      ^                                                     |
+      {1:~                                                    }|*12
+      {1:~                                                 }{4:foo}|
+    ]])
+    feed('g<lt>')
+    screen:expect([[
+                                                           |
+      {1:~                                                    }|*11
+      {3:                                                     }|
+      {101:fo^o}{100:                                                  }|
     ]])
   end)
 end)

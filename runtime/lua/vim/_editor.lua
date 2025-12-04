@@ -42,6 +42,8 @@ for k, v in pairs({
   pack = true,
   _watch = true,
   net = true,
+  pos = true,
+  range = true,
 }) do
   vim._submodules[k] = v
 end
@@ -248,7 +250,7 @@ do
       return false
     end
     undo_started = true
-    if phase ~= -1 and (now - tdots >= 100) then
+    if not is_last_chunk and (now - tdots >= 100) then
       local dots = ('.'):rep(tick % 4)
       tdots = now
       tick = tick + 1
@@ -602,7 +604,8 @@ local on_key_cbs = {} --- @type table<integer,[function, table]>
 ---          are applied, and {typed} is the key(s) before mappings are applied.
 ---          {typed} may be empty if {key} is produced by non-typed key(s) or by the
 ---          same typed key(s) that produced a previous {key}.
----          If {fn} returns an empty string, {key} is discarded/ignored.
+---          If {fn} returns an empty string, {key} is discarded/ignored, and if {key}
+---          is [<Cmd>] then the "[<Cmd>]…[<CR>]" sequence is discarded as a whole.
 ---          When {fn} is `nil`, the callback associated with namespace {ns_id} is removed.
 ---@param ns_id integer? Namespace ID. If nil or 0, generates and returns a
 ---                      new |nvim_create_namespace()| id.

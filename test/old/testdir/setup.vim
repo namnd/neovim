@@ -6,7 +6,7 @@ if exists('s:did_load')
     set completeopt=menu,preview
   endif
   set define=^\\s*#\\s*define
-  set diffopt=internal,filler,closeoff,inline:simple
+  set diffopt=internal,filler,closeoff,indent-heuristic,inline:char
   set directory^=.
   set display=
   set fillchars=vert:\|,foldsep:\|,fold:-
@@ -19,7 +19,7 @@ if exists('s:did_load')
   set listchars=eol:$
   set maxsearchcount=99
   set mousemodel=extend
-  set nohidden nosmarttab noautoindent noautoread noruler noshowcmd
+  set nohidden nosmarttab noautoindent noautoread
   set nohlsearch noincsearch
   set nrformats=bin,octal,hex
   set sessionoptions+=options

@@ -1,5 +1,5 @@
 <h1 align="center">
-  <img src="https://raw.githubusercontent.com/neovim/neovim.github.io/master/logos/neovim-logo-300x87.png" alt="Neovim">
+  <img src="https://raw.githubusercontent.com/neovim/neovim.github.io/master/static/logos/neovim-logo-300x87.png" alt="Neovim">
 
   <a href="https://neovim.io/doc/">Documentation</a> |
   <a href="https://app.element.io/#/room/#neovim:matrix.org">Chat</a>
@@ -15,7 +15,7 @@ Neovim is a project that seeks to aggressively refactor [Vim](https://www.vim.or
 - Simplify maintenance and encourage [contributions](CONTRIBUTING.md)
 - Split the work between multiple developers
 - Enable [advanced UIs] without modifications to the core
-- Maximize [extensibility](https://neovim.io/doc/user/ui.html)
+- Maximize [extensibility](https://neovim.io/doc/user/api-ui-events.html#api-ui-events)
 
 See the [Introduction](https://github.com/neovim/neovim/wiki/Introduction) wiki page and [Roadmap]
 for more information.

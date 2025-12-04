@@ -2,7 +2,6 @@ local uv = vim.uv
 local api = vim.api
 local lsp = vim.lsp
 local log = lsp.log
-local ms = lsp.protocol.Methods
 local changetracking = lsp._changetracking
 local validate = vim.validate
 
@@ -26,18 +25,12 @@ local all_clients = {}
 --- No debounce occurs if `nil`.
 --- (default: `150`)
 --- @field debounce_text_changes integer
----
---- Milliseconds to wait for server to exit cleanly after sending the
---- "shutdown" request before sending kill -15. If set to false, nvim exits
---- immediately after sending the "shutdown" request to the server.
---- (default: `false`)
---- @field exit_timeout integer|false
 
 --- @class vim.lsp.ClientConfig
 ---
---- Callback invoked before the LSP "initialize" phase, where `params` contains the parameters
---- being sent to the server and `config` is the config that was passed to |vim.lsp.start()|.
---- You can use this to modify parameters before they are sent.
+--- Callback which can modify parameters before they are sent to the server. Invoked before LSP
+--- "initialize" phase (after `cmd` is invoked), where `params` is the parameters being sent to the
+--- server and `config` is the config passed to |vim.lsp.start()|.
 --- @field before_init? fun(params: lsp.InitializeParams, config: vim.lsp.ClientConfig)
 ---
 --- Map overriding the default capabilities defined by |vim.lsp.protocol.make_client_capabilities()|,
@@ -75,6 +68,12 @@ local all_clients = {}
 --- behind orphaned server processes.
 --- (default: `true`)
 --- @field detached? boolean
+---
+--- Milliseconds to wait for server to exit cleanly after sending the "shutdown" request before
+--- sending kill -15. If set to false, waits indefinitely. If set to true, nvim will kill the
+--- server immediately.
+--- (default: `false`)
+--- @field exit_timeout? integer|boolean
 ---
 --- A table with flags for the client. The current (experimental) flags are:
 --- @field flags? vim.lsp.Client.Flags
@@ -158,6 +157,12 @@ local all_clients = {}
 --- Capabilities provided at runtime (after startup).
 --- @field dynamic_capabilities lsp.DynamicCapabilities
 ---
+--- Milliseconds to wait for server to exit cleanly after sending the "shutdown" request before
+--- sending kill -15. If set to false, waits indefinitely. If set to true, nvim will kill the
+--- server immediately.
+--- (default: `false`)
+--- @field exit_timeout integer|boolean
+---
 --- A table with flags for the client. The current (experimental) flags are:
 --- @field flags vim.lsp.Client.Flags
 ---
@@ -209,8 +214,13 @@ local all_clients = {}
 --- See [vim.lsp.ClientConfig].
 --- @field workspace_folders lsp.WorkspaceFolder[]?
 ---
---- Whether linked editing ranges are enabled for this client.
---- @field _linked_editing_enabled boolean?
+--- @field _enabled_capabilities table<vim.lsp.capability.Name, boolean?>
+---
+--- Whether on-type formatting is enabled for this client.
+--- @field _otf_enabled boolean?
+---
+--- Timer for stop() with timeout.
+--- @field private _shutdown_timer uv.uv_timer_t?
 ---
 --- Track this so that we can escalate automatically if we've already tried a
 --- graceful shutdown
@@ -313,6 +323,7 @@ local function validate_config(config)
   validate('cmd_cwd', config.cmd_cwd, optional_validator(is_dir), 'directory')
   validate('cmd_env', config.cmd_env, 'table', true)
   validate('detached', config.detached, 'boolean', true)
+  validate('exit_timeout', config.exit_timeout, { 'number', 'boolean' }, true)
   validate('name', config.name, 'string', true)
   validate('on_error', config.on_error, 'function', true)
   validate('on_exit', config.on_exit, { 'function', 'table' }, true)
@@ -387,6 +398,7 @@ function Client.create(config)
     commands = config.commands or {},
     settings = config.settings or {},
     flags = config.flags or {},
+    exit_timeout = config.exit_timeout or false,
     get_language_id = config.get_language_id or default_get_language_id,
     capabilities = config.capabilities,
     workspace_folders = lsp._get_workspace_folders(config.workspace_folders or config.root_dir),
@@ -435,6 +447,9 @@ function Client.create(config)
       return self:_get_registration(method, opts and opts.bufnr) ~= nil
     end,
   }
+
+  ---@type table <vim.lsp.capability.Name, boolean?>
+  self._enabled_capabilities = {}
 
   --- @type table<string|integer, string> title of unfinished progress sequences by token
   self.progress.pending = {}
@@ -509,6 +524,11 @@ function Client:initialize()
     root_path = vim.uri_to_fname(root_uri)
   end
 
+  -- HACK: Capability modules must be loaded
+  require('vim.lsp.semantic_tokens')
+  require('vim.lsp._folding_range')
+  require('vim.lsp.inline_completion')
+
   local init_params = {
     -- The process Id of the parent process that started the server. Is null if
     -- the process has not been started by another process.  If the parent
@@ -568,7 +588,7 @@ function Client:initialize()
     self.server_info = result.serverInfo
 
     if next(self.settings) then
-      self:notify(ms.workspace_didChangeConfiguration, { settings = self.settings })
+      self:notify('workspace/didChangeConfiguration', { settings = self.settings })
     end
 
     -- If server is being restarted, make sure to re-attach to any previously attached buffers.
@@ -594,20 +614,22 @@ end
 
 -- Server capabilities for methods that support static registration.
 local static_registration_capabilities = {
-  [ms.textDocument_prepareCallHierarchy] = 'callHierarchyProvider',
-  [ms.textDocument_documentColor] = 'colorProvider',
-  [ms.textDocument_declaration] = 'declarationProvider',
-  [ms.textDocument_diagnostic] = 'diagnosticProvider',
-  [ms.textDocument_foldingRange] = 'foldingRangeProvider',
-  [ms.textDocument_implementation] = 'implementationProvider',
-  [ms.textDocument_inlayHint] = 'inlayHintProvider',
-  [ms.textDocument_inlineValue] = 'inlineValueProvider',
-  [ms.textDocument_linkedEditingRange] = 'linkedEditingRangeProvider',
-  [ms.textDocument_moniker] = 'monikerProvider',
-  [ms.textDocument_selectionRange] = 'selectionRangeProvider',
-  [ms.textDocument_semanticTokens_full] = 'semanticTokensProvider',
-  [ms.textDocument_typeDefinition] = 'typeDefinitionProvider',
-  [ms.textDocument_prepareTypeHierarchy] = 'typeHierarchyProvider',
+  ['textDocument/prepareCallHierarchy'] = 'callHierarchyProvider',
+  ['textDocument/documentColor'] = 'colorProvider',
+  ['textDocument/declaration'] = 'declarationProvider',
+  ['textDocument/diagnostic'] = 'diagnosticProvider',
+  ['textDocument/foldingRange'] = 'foldingRangeProvider',
+  ['textDocument/implementation'] = 'implementationProvider',
+  ['textDocument/inlayHint'] = 'inlayHintProvider',
+  ['textDocument/inlineCompletion'] = 'inlineCompletionProvider',
+  ['textDocument/inlineValue'] = 'inlineValueProvider',
+  ['textDocument/linkedEditingRange'] = 'linkedEditingRangeProvider',
+  ['textDocument/moniker'] = 'monikerProvider',
+  ['textDocument/selectionRange'] = 'selectionRangeProvider',
+  ['textDocument/semanticTokens/full'] = 'semanticTokensProvider',
+  ['textDocument/semanticTokens/range'] = 'semanticTokensProvider',
+  ['textDocument/typeDefinition'] = 'typeDefinitionProvider',
+  ['textDocument/prepareTypeHierarchy'] = 'typeHierarchyProvider',
 }
 
 --- @private
@@ -617,6 +639,7 @@ function Client:_process_static_registrations()
   for method, capability in pairs(static_registration_capabilities) do
     if
       vim.tbl_get(self.server_capabilities, capability, 'id')
+      --- @cast method vim.lsp.protocol.Method
       and self:_supports_registration(method)
     then
       static_registrations[#static_registrations + 1] = {
@@ -638,7 +661,7 @@ end
 --- Returns the handler associated with an LSP method.
 --- Returns the default handler if the user hasn't set a custom one.
 ---
---- @param method (string) LSP method name
+--- @param method (vim.lsp.protocol.Method) LSP method name
 --- @return lsp.Handler? handler for the given method, if defined, or the default from |vim.lsp.handlers|
 function Client:_resolve_handler(method)
   return self.handlers[method] or lsp.handlers[method]
@@ -648,7 +671,7 @@ end
 --- @param id integer
 --- @param req_type 'pending'|'complete'|'cancel'
 --- @param bufnr? integer (only required for req_type='pending')
---- @param method? string (only required for req_type='pending')
+--- @param method? vim.lsp.protocol.Method (only required for req_type='pending')
 function Client:_process_request(id, req_type, bufnr, method)
   local pending = req_type == 'pending'
 
@@ -816,7 +839,7 @@ end
 --- @return boolean status indicating if the notification was successful.
 ---                        If it is false, then the client has shutdown.
 function Client:notify(method, params)
-  if method ~= ms.textDocument_didChange then
+  if method ~= 'textDocument/didChange' then
     changetracking.flush(self)
   end
 
@@ -845,7 +868,7 @@ end
 --- @see |Client:notify()|
 function Client:cancel_request(id)
   self:_process_request(id, 'cancel')
-  return self.rpc.notify(ms.dollar_cancelRequest, { id = id })
+  return self.rpc.notify('$/cancelRequest', { id = id })
 end
 
 --- Stops a client, optionally with force.
@@ -854,28 +877,41 @@ end
 --- you request to stop a client which has previously been requested to
 --- shutdown, it will automatically escalate and force shutdown.
 ---
---- @param force? boolean
+--- If `force` is a number, it will be treated as the time in milliseconds to
+--- wait before forcing the shutdown.
+---
+--- Note: Forcing shutdown while a server is busy writing out project or index
+--- files can lead to file corruption.
+---
+--- @param force? boolean|integer
 function Client:stop(force)
-  if self:is_stopped() then
+  local rpc = self.rpc
+  if rpc.is_closing() then
     return
   end
 
   self._is_stopping = true
-  local rpc = self.rpc
 
-  vim.lsp._watchfiles.cancel(self.id)
+  lsp._watchfiles.cancel(self.id)
 
-  if force or not self.initialized or self._graceful_shutdown_failed then
+  if force == true or not self.initialized or self._graceful_shutdown_failed then
     rpc.terminate()
     return
   end
 
+  if type(force) == 'number' then
+    self._shutdown_timer = vim.defer_fn(function()
+      self._shutdown_timer = nil
+      self:stop(true)
+    end, force)
+  end
+
   -- Sending a signal after a process has exited is acceptable.
-  rpc.request(ms.shutdown, nil, function(err, _)
+  rpc.request('shutdown', nil, function(err, _)
     if err == nil then
-      rpc.notify(ms.exit)
+      rpc.notify('exit')
     else
-      -- If there was an error in the shutdown request, then term to be safe.
+      -- If there was an error in the shutdown request, then terminate to be safe.
       rpc.terminate()
       self._graceful_shutdown_failed = true
     end
@@ -912,8 +948,8 @@ function Client:_register(registrations)
 
   for _, reg in ipairs(registrations) do
     local method = reg.method
-    if method == ms.workspace_didChangeWatchedFiles then
-      vim.lsp._watchfiles.register(reg, self.id)
+    if method == 'workspace/didChangeWatchedFiles' then
+      lsp._watchfiles.register(reg, self.id)
     elseif not self:_supports_registration(method) then
       unsupported[#unsupported + 1] = method
     end
@@ -946,8 +982,8 @@ end
 function Client:_unregister(unregistrations)
   self:_unregister_dynamic(unregistrations)
   for _, unreg in ipairs(unregistrations) do
-    if unreg.method == ms.workspace_didChangeWatchedFiles then
-      vim.lsp._watchfiles.unregister(unreg, self.id)
+    if unreg.method == 'workspace/didChangeWatchedFiles' then
+      lsp._watchfiles.unregister(unreg, self.id)
     end
   end
 end
@@ -1034,7 +1070,7 @@ function Client:exec_cmd(command, context, handler)
     command = cmdname,
     arguments = command.arguments,
   }
-  self:request(ms.workspace_executeCommand, params, handler, context.bufnr)
+  self:request('workspace/executeCommand', params, handler, context.bufnr)
 end
 
 --- Default handler for the 'textDocument/didOpen' LSP notification.
@@ -1042,14 +1078,14 @@ end
 --- @param bufnr integer Number of the buffer, or 0 for current
 function Client:_text_document_did_open_handler(bufnr)
   changetracking.init(self, bufnr)
-  if not self:supports_method(ms.textDocument_didOpen) then
+  if not self:supports_method('textDocument/didOpen') then
     return
   end
   if not api.nvim_buf_is_loaded(bufnr) then
     return
   end
 
-  self:notify(ms.textDocument_didOpen, {
+  self:notify('textDocument/didOpen', {
     textDocument = {
       version = lsp.util.buf_versions[bufnr],
       uri = vim.uri_from_bufnr(bufnr),
@@ -1076,6 +1112,10 @@ function Client:on_attach(bufnr)
   self:_text_document_did_open_handler(bufnr)
 
   lsp._set_defaults(self, bufnr)
+  -- `enable(true)` cannot be called from `_set_defaults` for features with dynamic registration,
+  -- because it overrides the state every time `client/registerCapability` is received.
+  -- To allow disabling it once in `LspAttach`, we enable it once here instead.
+  lsp.document_color.enable(true, bufnr)
 
   api.nvim_exec_autocmds('LspAttach', {
     buffer = bufnr,
@@ -1084,16 +1124,24 @@ function Client:on_attach(bufnr)
   })
 
   self:_run_callbacks(self._on_attach_cbs, lsp.client_errors.ON_ATTACH_ERROR, self, bufnr)
-
-  -- schedule the initialization of semantic tokens to give the above
+  -- schedule the initialization of capabilities to give the above
   -- on_attach and LspAttach callbacks the ability to schedule wrap the
   -- opt-out (deleting the semanticTokensProvider from capabilities)
   vim.schedule(function()
-    if vim.tbl_get(self.server_capabilities, 'semanticTokensProvider', 'full') then
-      lsp.semantic_tokens._start(bufnr, self.id)
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+      return
     end
-    if vim.tbl_get(self.server_capabilities, 'foldingRangeProvider') then
-      lsp._folding_range._setup(bufnr)
+    for _, Capability in pairs(lsp._capability.all) do
+      if
+        self:supports_method(Capability.method)
+        and lsp._capability.is_enabled(Capability.name, {
+          bufnr = bufnr,
+          client_id = self.id,
+        })
+      then
+        local capability = Capability.active[bufnr] or Capability:new(bufnr)
+        capability:on_attach(self.id)
+      end
     end
   end)
 
@@ -1207,12 +1255,30 @@ function Client:_on_detach(bufnr)
     })
   end
 
+  for _, Capability in pairs(lsp._capability.all) do
+    if
+      self:supports_method(Capability.method)
+      and lsp._capability.is_enabled(Capability.name, {
+        bufnr = bufnr,
+        client_id = self.id,
+      })
+    then
+      local capability = Capability.active[bufnr]
+      if capability then
+        capability:on_detach(self.id)
+        if next(capability.client_state) == nil then
+          capability:destroy()
+        end
+      end
+    end
+  end
+
   changetracking.reset_buf(self, bufnr)
 
-  if self:supports_method(ms.textDocument_didClose) then
+  if self:supports_method('textDocument/didClose') then
     local uri = vim.uri_from_bufnr(bufnr)
     local params = { textDocument = { uri = uri } }
-    self:notify(ms.textDocument_didClose, params)
+    self:notify('textDocument/didClose', params)
   end
 
   self.attached_buffers[bufnr] = nil
@@ -1235,7 +1301,7 @@ local function reset_defaults(bufnr)
   end
   vim._with({ buf = bufnr }, function()
     local keymap = vim.fn.maparg('K', 'n', false, true)
-    if keymap and keymap.callback == vim.lsp.buf.hover and keymap.buffer == 1 then
+    if keymap and keymap.callback == lsp.buf.hover and keymap.buffer == 1 then
       vim.keymap.del('n', 'K', { buffer = bufnr })
     end
   end)
@@ -1247,6 +1313,11 @@ end
 --- @param code integer) exit code of the process
 --- @param signal integer the signal used to terminate (if any)
 function Client:_on_exit(code, signal)
+  if self._shutdown_timer and not self._shutdown_timer:is_closing() then
+    self._shutdown_timer:close()
+    self._shutdown_timer = nil
+  end
+
   vim.schedule(function()
     for bufnr in pairs(self.attached_buffers) do
       self:_on_detach(bufnr)
@@ -1272,7 +1343,7 @@ function Client:_on_exit(code, signal)
         self and self.name or 'unknown',
         code,
         signal,
-        lsp.get_log_path()
+        log.get_filename()
       )
       vim.notify(msg, vim.log.levels.WARN)
     end
@@ -1299,7 +1370,7 @@ function Client:_add_workspace_folder(dir)
 
   local wf = assert(lsp._get_workspace_folders(dir))
 
-  self:notify(ms.workspace_didChangeWorkspaceFolders, {
+  self:notify('workspace/didChangeWorkspaceFolders', {
     event = { added = wf, removed = {} },
   })
 
@@ -1314,7 +1385,7 @@ end
 function Client:_remove_workspace_folder(dir)
   local wf = assert(lsp._get_workspace_folders(dir))
 
-  self:notify(ms.workspace_didChangeWorkspaceFolders, {
+  self:notify('workspace/didChangeWorkspaceFolders', {
     event = { added = {}, removed = wf },
   })
 

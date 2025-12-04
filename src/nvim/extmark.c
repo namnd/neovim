@@ -45,9 +45,7 @@
 #include "nvim/undo.h"
 #include "nvim/undo_defs.h"
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "extmark.c.generated.h"
-#endif
+#include "extmark.c.generated.h"
 
 /// Create or update an extmark
 ///
@@ -511,7 +509,7 @@ void extmark_adjust(buf_T *buf, linenr_T line1, linenr_T line2, linenr_T amount,
                       new_row, 0, new_byte, undo);
 }
 
-// Adjust extmarks following a text edit.
+// Adjusts extmarks after a text edit, and emits the `on_bytes` event (`:h api-buffer-updates`).
 //
 // @param buf
 // @param start_row   Start row of the region to be changed

@@ -1,6 +1,5 @@
 local util = require('vim.lsp.util')
 local log = require('vim.lsp.log')
-local ms = require('vim.lsp.protocol').Methods
 local api = vim.api
 local M = {}
 
@@ -49,7 +48,7 @@ local function execute_lens(lens, bufnr, client_id)
   local client = vim.lsp.get_client_by_id(client_id)
   assert(client, 'Client is required to execute lens, client_id=' .. client_id)
   client:exec_cmd(lens.command, { bufnr = bufnr }, function(...)
-    vim.lsp.handlers[ms.workspace_executeCommand](...)
+    vim.lsp.handlers['workspace/executeCommand'](...)
     M.refresh()
   end)
 end
@@ -70,16 +69,20 @@ function M.get(bufnr)
   return lenses
 end
 
---- Run the code lens in the current line
----
+--- Run the code lens available in the current line.
 function M.run()
-  local line = api.nvim_win_get_cursor(0)[1]
+  local line = api.nvim_win_get_cursor(0)[1] - 1
   local bufnr = api.nvim_get_current_buf()
   local options = {} --- @type {client: integer, lens: lsp.CodeLens}[]
   local lenses_by_client = lens_cache_by_buf[bufnr] or {}
   for client, lenses in pairs(lenses_by_client) do
     for _, lens in pairs(lenses) do
-      if lens.range.start.line == (line - 1) and lens.command and lens.command.command ~= '' then
+      if
+        lens.command
+        and lens.command.command ~= ''
+        and lens.range.start.line <= line
+        and lens.range['end'].line >= line
+      then
         table.insert(options, { client = client, lens = lens })
       end
     end
@@ -272,7 +275,7 @@ local function resolve_lenses(lenses, bufnr, client_id, callback)
         display_line_countdown()
       else
         assert(client)
-        client:request(ms.codeLens_resolve, lens, function(_, result)
+        client:request('codeLens/resolve', lens, function(_, result)
           if api.nvim_buf_is_loaded(bufnr) and result and result.command then
             lens.command = result.command
           end
@@ -336,7 +339,7 @@ function M.refresh(opts)
 
       local request_ids = vim.lsp.buf_request(
         buf,
-        ms.textDocument_codeLens,
+        'textDocument/codeLens',
         params,
         M.on_codelens,
         function() end

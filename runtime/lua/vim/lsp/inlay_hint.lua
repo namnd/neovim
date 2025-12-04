@@ -1,6 +1,5 @@
 local util = require('vim.lsp.util')
 local log = require('vim.lsp.log')
-local ms = require('vim.lsp.protocol').Methods
 local api = vim.api
 local M = {}
 
@@ -44,9 +43,9 @@ function M.on_inlayhint(err, result, ctx)
     return
   end
   local bufnr = assert(ctx.bufnr)
+
   if
     util.buf_versions[bufnr] ~= ctx.version
-    or not result
     or not api.nvim_buf_is_loaded(bufnr)
     or not bufstates[bufnr].enabled
   then
@@ -60,6 +59,9 @@ function M.on_inlayhint(err, result, ctx)
   end
   local client_hints = bufstate.client_hints
   local client = assert(vim.lsp.get_client_by_id(client_id))
+
+  -- If there's no error but the result is nil, clear existing hints.
+  result = result or {}
 
   local new_lnum_hints = vim.defaulttable()
   local num_unprocessed = #result
@@ -93,10 +95,10 @@ local function refresh(bufnr, client_id)
     ipairs(vim.lsp.get_clients({
       bufnr = bufnr,
       id = client_id,
-      method = ms.textDocument_inlayHint,
+      method = 'textDocument/inlayHint',
     }))
   do
-    client:request(ms.textDocument_inlayHint, {
+    client:request('textDocument/inlayHint', {
       textDocument = util.make_text_document_params(bufnr),
       range = util._make_line_range_params(
         bufnr,
@@ -115,7 +117,7 @@ function M.on_refresh(err, _, ctx)
   if err then
     return vim.NIL
   end
-  for _, bufnr in ipairs(vim.lsp.get_buffers_by_client_id(ctx.client_id)) do
+  for bufnr in pairs(vim.lsp.get_client_by_id(ctx.client_id).attached_buffers or {}) do
     for _, winid in ipairs(api.nvim_list_wins()) do
       if api.nvim_win_get_buf(winid) == bufnr then
         if bufstates[bufnr] and bufstates[bufnr].enabled then
@@ -174,7 +176,7 @@ function M.get(filter)
     --- @param buf integer
     vim.tbl_map(function(buf)
       vim.list_extend(hints, M.get(vim.tbl_extend('keep', { bufnr = buf }, filter)))
-    end, vim.api.nvim_list_bufs())
+    end, api.nvim_list_bufs())
     return hints
   else
     bufnr = vim._resolve_bufnr(bufnr)
@@ -187,7 +189,7 @@ function M.get(filter)
 
   local clients = vim.lsp.get_clients({
     bufnr = bufnr,
-    method = ms.textDocument_inlayHint,
+    method = 'textDocument/inlayHint',
   })
   if #clients == 0 then
     return {}
@@ -267,8 +269,8 @@ api.nvim_create_autocmd('LspNotify', {
     local bufnr = args.buf
 
     if
-      args.data.method ~= ms.textDocument_didChange
-      and args.data.method ~= ms.textDocument_didOpen
+      args.data.method ~= 'textDocument/didChange'
+      and args.data.method ~= 'textDocument/didOpen'
     then
       return
     end
@@ -303,7 +305,7 @@ api.nvim_create_autocmd('LspDetach', {
   callback = function(args)
     ---@type integer
     local bufnr = args.buf
-    local clients = vim.lsp.get_clients({ bufnr = bufnr, method = ms.textDocument_inlayHint })
+    local clients = vim.lsp.get_clients({ bufnr = bufnr, method = 'textDocument/inlayHint' })
 
     if not vim.iter(clients):any(function(c)
       return c.id ~= args.data.client_id

@@ -1355,6 +1355,22 @@ describe('lua stdlib', function()
     )
   end)
 
+  it('vim.call fails in fast context', function()
+    local screen = Screen.new(120, 10)
+    exec_lua([[
+      local timer = vim.uv.new_timer()
+      timer:start(0, 0, function()
+        timer:close()
+        vim.call('sin', 0.0)
+      end)
+    ]])
+    screen:expect({
+      any = pesc('E5560: Vimscript function "sin" must not be called in a fast event context'),
+    })
+    feed('<CR>')
+    assert_alive()
+  end)
+
   it('vim.fn errors when calling API function', function()
     matches(
       'Tried to call API function with vim.fn: use vim.api.nvim_get_current_line instead',
@@ -2025,28 +2041,110 @@ stack traceback:
     end)
 
     it('can discard input', function()
-      -- discard every other normal 'x' command
+      -- discard the first key produced by every other 'x' key typed
       exec_lua [[
         n_key = 0
 
         vim.on_key(function(buf, typed_buf)
           if typed_buf == 'x' then
             n_key = n_key + 1
+            return (n_key % 2 == 0) and '' or nil
           end
-          return (n_key % 2 == 0) and "" or nil
         end)
       ]]
 
       api.nvim_buf_set_lines(0, 0, -1, true, { '54321' })
 
-      feed('x')
+      feed('x') -- 'x' not discarded
       expect('4321')
-      feed('x')
+      feed('x') -- 'x' discarded
       expect('4321')
-      feed('x')
+      feed('x') -- 'x' not discarded
       expect('321')
-      feed('x')
+      feed('x') -- 'x' discarded
       expect('321')
+
+      api.nvim_buf_set_lines(0, 0, -1, true, { '54321' })
+
+      -- only the first key from the mapping is discarded
+      command('nnoremap x $x')
+      feed('0x') -- '$' not discarded
+      expect('5432')
+      feed('0x') -- '$' discarded
+      expect('432')
+      feed('0x') -- '$' not discarded
+      expect('43')
+      feed('0x') -- '$' discarded
+      expect('3')
+
+      feed('i')
+      -- when discarding <Cmd>, the following command is also discarded.
+      command([[inoremap x <Cmd>call append('$', 'foo')<CR>]])
+      feed('x') -- not discarded
+      expect('3\nfoo')
+      feed('x') -- discarded
+      expect('3\nfoo')
+      feed('x') -- not discarded
+      expect('3\nfoo\nfoo')
+      feed('x') -- discarded
+      expect('3\nfoo\nfoo')
+
+      -- K_LUA is handled similarly to <Cmd>
+      exec_lua([[vim.keymap.set('i', 'x', function() vim.fn.append('$', 'bar') end)]])
+      feed('x') -- not discarded
+      expect('3\nfoo\nfoo\nbar')
+      feed('x') -- discarded
+      expect('3\nfoo\nfoo\nbar')
+      feed('x') -- not discarded
+      expect('3\nfoo\nfoo\nbar\nbar')
+      feed('x') -- discarded
+      expect('3\nfoo\nfoo\nbar\nbar')
+    end)
+
+    it('behaves consistently with <Cmd>, K_LUA, nvim_paste', function()
+      exec_lua([[
+        vim.keymap.set('i', '<F2>', "<Cmd>call append('$', 'FOO')<CR>")
+        vim.keymap.set('i', '<F3>', function() vim.fn.append('$', 'BAR') end)
+      ]])
+
+      feed('qrafoo<F2><F3>')
+      api.nvim_paste('bar', false, -1)
+      feed('<Esc>q')
+      expect('foobar\nFOO\nBAR')
+
+      exec_lua([[
+        keys = {}
+        typed = {}
+
+        vim.on_key(function(buf, typed_buf)
+          table.insert(keys, buf)
+          table.insert(typed, typed_buf)
+        end)
+      ]])
+
+      feed('@r')
+      local keys = exec_lua('return keys')
+      eq('@r', exec_lua([[return table.concat(typed, '')]]))
+      expect('foobarfoobar\nFOO\nBAR\nFOO\nBAR')
+
+      -- Add a new callback that discards most special keys as well as 'f'.
+      -- The old callback is still active.
+      exec_lua([[
+        vim.on_key(function(buf, _)
+          if not buf:find('^[@rao\27]$') then
+            return ''
+          end
+        end)
+
+        keys = {}
+        typed = {}
+      ]])
+
+      feed('@r')
+      eq(keys, exec_lua('return keys'))
+      eq('@r', exec_lua([[return table.concat(typed, '')]]))
+      -- The "bar" paste is discarded as a whole.
+      expect('foobarfoobaroo\nFOO\nBAR\nFOO\nBAR')
     end)
 
     it('callback invalid return', function()
@@ -2094,6 +2192,31 @@ stack traceback:
 
     it('runs from lua', function()
       exec_lua [[vim.wait(100, function() return true end)]]
+    end)
+
+    it('returns all (multiple) callback results', function()
+      eq({ true, false }, exec_lua [[return { vim.wait(200, function() return true, false end) }]])
+      eq(
+        { true, 'a', 42, { ok = { 'yes' } } },
+        exec_lua [[
+          local ok, rv1, rv2, rv3 = vim.wait(200, function()
+            return true, 'a', 42, { ok = { 'yes' } }
+          end)
+
+          return { ok, rv1, rv2, rv3 }
+        ]]
+      )
+    end)
+
+    it('does not return callback results on timeout', function()
+      eq(
+        { false, -1 },
+        exec_lua [[
+          return { vim.wait(1, function()
+            return false, 'a', 42, { ok = { 'yes' } }
+          end) }
+        ]]
+      )
     end)
 
     it('waits the expected time if false', function()
@@ -2184,38 +2307,36 @@ stack traceback:
       eq({ false, '[string "<nvim>"]:1: As Expected' }, { result[1], remove_trace(result[2]) })
     end)
 
-    it('if callback is passed, it must be a function', function()
+    it('callback must be a function', function()
       eq(
-        { false, 'vim.wait: if passed, condition must be a function' },
-        exec_lua [[
-        return {pcall(function() vim.wait(1000, 13) end)}
-      ]]
+        { false, 'vim.wait: callback must be callable' },
+        exec_lua [[return {pcall(function() vim.wait(1000, 13) end)}]]
       )
     end)
 
-    it('allows waiting with no callback, explicit', function()
+    it('waits if callback arg is nil', function()
       eq(
         true,
         exec_lua [[
         local start_time = vim.uv.hrtime()
-        vim.wait(50, nil)
+        vim.wait(50, nil) -- select('#', ...) == 1
         return vim.uv.hrtime() - start_time > 25000
       ]]
       )
     end)
 
-    it('allows waiting with no callback, implicit', function()
+    it('waits if callback arg is omitted', function()
       eq(
         true,
         exec_lua [[
         local start_time = vim.uv.hrtime()
-        vim.wait(50)
+        vim.wait(50) -- select('#', ...) == 0
         return vim.uv.hrtime() - start_time > 25000
       ]]
       )
     end)
 
-    it('calls callbacks exactly once if they return true immediately', function()
+    it('invokes callback exactly once if it returns true immediately', function()
       eq(
         true,
         exec_lua [[

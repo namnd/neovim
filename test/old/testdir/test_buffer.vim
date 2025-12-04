@@ -169,6 +169,17 @@ func Test_bnext_bprev_help()
   b XHelp1
   blast   | call assert_equal(b4, bufnr())
 
+  " Cycling through help buffers works even if they aren't listed.
+  b XHelp1
+  setlocal nobuflisted
+  bnext | call assert_equal(b3, bufnr())
+  bnext | call assert_equal(b1, bufnr())
+  bprev | call assert_equal(b3, bufnr())
+  setlocal nobuflisted
+  bprev | call assert_equal(b1, bufnr())
+  bprev | call assert_equal(b3, bufnr())
+  bnext | call assert_equal(b1, bufnr())
+
   %bwipe!
 endfunc
 
@@ -434,12 +445,18 @@ func Test_buffer_scheme()
   set noshellslash
   %bwipe!
   let bufnames = [
-    \ #{id: 'ssb0', name: 'test://xyz/foo/ssb0'    , match: 1},
-    \ #{id: 'ssb1', name: 'test+abc://xyz/foo/ssb1', match: 0},
-    \ #{id: 'ssb2', name: 'test_abc://xyz/foo/ssb2', match: 0},
-    \ #{id: 'ssb3', name: 'test-abc://xyz/foo/ssb3', match: 1},
-    \ #{id: 'ssb4', name: '-test://xyz/foo/ssb4'   , match: 0},
-    \ #{id: 'ssb5', name: 'test-://xyz/foo/ssb5'   , match: 0},
+    \ #{id: 'ssb0' , name: 'test://xyz/foo/ssb0'    , match: 1},
+    \ #{id: 'ssb1' , name: 'test1234://xyz/foo/ssb1', match: 1},
+    \ #{id: 'ssb2' , name: 'test+abc://xyz/foo/ssb2', match: 1},
+    \ #{id: 'ssb3' , name: 'test-abc://xyz/foo/ssb3', match: 1},
+    \ #{id: 'ssb4' , name: 'test.abc://xyz/foo/ssb4', match: 1},
+    \ #{id: 'ssb5' , name: 'test_abc://xyz/foo/ssb5', match: 0},
+    \ #{id: 'ssb6' , name: '+test://xyz/foo/ssb6'   , match: 0},
+    \ #{id: 'ssb7' , name: 'test+://xyz/foo/ssb7'   , match: 0},
+    \ #{id: 'ssb8' , name: '-test://xyz/foo/ssb8'   , match: 0},
+    \ #{id: 'ssb9' , name: 'test-://xyz/foo/ssb9'   , match: 0},
+    \ #{id: 'ssb10', name: '.test://xyz/foo/ssb10'  , match: 0},
+    \ #{id: 'ssb11', name: 'test.://xyz/foo/ssb11'  , match: 0},
     \]
   for buf in bufnames
     new `=buf.name`
@@ -596,6 +613,64 @@ func Test_closed_buffer_still_in_window()
   unlet! s:w s:b
   autocmd! ViewClosedBuffer
   %bw!
+endfunc
+
+" Cursor position should be restored when switching to a buffer previously
+" viewed in a window, regardless of whether it's visible in another one.
+func Test_switch_to_previously_viewed_buffer()
+  set nostartofline
+  new Xviewbuf
+  call setline(1, range(1, 200))
+  let oldwin = win_getid()
+  vsplit
+
+  call cursor(100, 3)
+  call assert_equal('100', getline('.'))
+  edit Xotherbuf
+  buffer Xviewbuf
+  call assert_equal([0, 100, 3, 0], getpos('.'))
+  call assert_equal('100', getline('.'))
+
+  edit Xotherbuf
+  wincmd p
+  normal! gg10dd
+  wincmd p
+  buffer Xviewbuf
+  call assert_equal([0, 90, 3, 0], getpos('.'))
+  call assert_equal('100', getline('.'))
+
+  edit Xotherbuf
+  wincmd p
+  normal! ggP
+  wincmd p
+  buffer Xviewbuf
+  call assert_equal([0, 100, 3, 0], getpos('.'))
+  call assert_equal('100', getline('.'))
+
+  edit Xotherbuf
+  wincmd p
+  normal! 96gg10ddgg
+  wincmd p
+  buffer Xviewbuf
+  " The original cursor line was deleted, so cursor is restored to the start
+  " of the line before the deleted range.
+  call assert_equal([0, 95, 1, 0], getpos('.'))
+  call assert_equal('95', getline('.'))
+
+  normal! u
+  exe win_id2win(oldwin) .. 'close'
+  setlocal bufhidden=hide
+
+  call cursor(200, 3)
+  call assert_equal('200', getline('.'))
+  edit Xotherbuf
+  buffer Xviewbuf
+  call assert_equal([0, 200, 3, 0], getpos('.'))
+  call assert_equal('200', getline('.'))
+
+  bwipe! Xotherbuf
+  bwipe! Xviewbuf
+  set startofline&
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

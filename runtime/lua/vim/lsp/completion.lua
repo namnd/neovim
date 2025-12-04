@@ -36,7 +36,6 @@ local M = {}
 local api = vim.api
 local lsp = vim.lsp
 local protocol = lsp.protocol
-local ms = protocol.Methods
 
 local rtt_ms = 50.0
 local ns_to_ms = 0.000001
@@ -302,7 +301,7 @@ function M._lsp_to_complete_items(result, prefix, client_id)
         return match_item_by_value(item.filterText, prefix)
       end
 
-      if item.textEdit then
+      if item.textEdit and not item.textEdit.newText then
         -- server took care of filtering
         return true
       end
@@ -314,6 +313,7 @@ function M._lsp_to_complete_items(result, prefix, client_id)
   local candidates = {}
   local bufnr = api.nvim_get_current_buf()
   local user_convert = vim.tbl_get(buf_handles, bufnr, 'convert')
+  local user_cmp = vim.tbl_get(buf_handles, bufnr, 'cmp')
   for _, item in ipairs(items) do
     if matches(item) then
       local word = get_completion_word(item, prefix, match_item_by_value)
@@ -349,15 +349,16 @@ function M._lsp_to_complete_items(result, prefix, client_id)
       table.insert(candidates, completion_item)
     end
   end
-  ---@diagnostic disable-next-line: no-unknown
-  table.sort(candidates, function(a, b)
-    ---@type lsp.CompletionItem
-    local itema = a.user_data.nvim.lsp.completion_item
-    ---@type lsp.CompletionItem
-    local itemb = b.user_data.nvim.lsp.completion_item
-    return (itema.sortText or itema.label) < (itemb.sortText or itemb.label)
-  end)
-
+  if not user_cmp then
+    ---@diagnostic disable-next-line: no-unknown
+    table.sort(candidates, function(a, b)
+      ---@type lsp.CompletionItem
+      local itema = a.user_data.nvim.lsp.completion_item
+      ---@type lsp.CompletionItem
+      local itemb = b.user_data.nvim.lsp.completion_item
+      return (itema.sortText or itema.label) < (itemb.sortText or itemb.label)
+    end)
+  end
   return candidates
 end
 
@@ -369,11 +370,18 @@ end
 local function adjust_start_col(lnum, line, items, encoding)
   local min_start_char = nil
   for _, item in pairs(items) do
-    if item.textEdit and item.textEdit.range and item.textEdit.range.start.line == lnum then
-      if min_start_char and min_start_char ~= item.textEdit.range.start.character then
-        return nil
+    if item.textEdit then
+      if item.textEdit.range and item.textEdit.range.start.line == lnum then
+        if min_start_char and min_start_char ~= item.textEdit.range.start.character then
+          return nil
+        end
+        min_start_char = item.textEdit.range.start.character
+      elseif item.textEdit.insert and item.textEdit.insert.start.line == lnum then
+        if min_start_char and min_start_char ~= item.textEdit.insert.start.character then
+          return nil
+        end
+        min_start_char = item.textEdit.insert.start.character
       end
-      min_start_char = item.textEdit.range.start.character
     end
   end
   if min_start_char then
@@ -448,7 +456,7 @@ local function request(clients, bufnr, win, ctx, callback)
     local params = lsp.util.make_position_params(win, client.offset_encoding)
     --- @cast params lsp.CompletionParams
     params.context = ctx
-    local ok, request_id = client:request(ms.textDocument_completion, params, function(err, result)
+    local ok, request_id = client:request('textDocument/completion', params, function(err, result)
       responses[client_id] = { err = err, result = result }
       remaining_requests = remaining_requests - 1
       if remaining_requests == 0 then
@@ -483,10 +491,7 @@ local function trigger(bufnr, clients, ctx)
   end
 
   local win = api.nvim_get_current_win()
-  local cursor_row, cursor_col = unpack(api.nvim_win_get_cursor(win)) --- @type integer, integer
-  local line = api.nvim_get_current_line()
-  local line_to_cursor = line:sub(1, cursor_col)
-  local word_boundary = vim.fn.match(line_to_cursor, '\\k*$')
+  local cursor_row = api.nvim_win_get_cursor(win)[1]
   local start_time = vim.uv.hrtime() --[[@as integer]]
   Context.last_request_time = start_time
 
@@ -497,13 +502,19 @@ local function trigger(bufnr, clients, ctx)
     Context.pending_requests = {}
     Context.isIncomplete = false
 
-    local row_changed = api.nvim_win_get_cursor(win)[1] ~= cursor_row
+    local new_cursor_row, cursor_col = unpack(api.nvim_win_get_cursor(win)) --- @type integer, integer
+    local row_changed = new_cursor_row ~= cursor_row
     local mode = api.nvim_get_mode().mode
     if row_changed or not (mode == 'i' or mode == 'ic') then
       return
     end
 
+    local line = api.nvim_get_current_line()
+    local line_to_cursor = line:sub(1, cursor_col)
+    local word_boundary = vim.fn.match(line_to_cursor, '\\k*$')
+
     local matches = {}
+
     local server_start_boundary --- @type integer?
     for client_id, response in pairs(responses) do
       local client = lsp.get_client_by_id(client_id)
@@ -531,9 +542,29 @@ local function trigger(bufnr, clients, ctx)
           result,
           encoding
         )
+
         vim.list_extend(matches, client_matches)
       end
     end
+
+    --- @type table[]
+    local prev_matches = vim.fn.complete_info({ 'items', 'matches' })['items']
+
+    --- @param prev_match table
+    prev_matches = vim.tbl_filter(function(prev_match)
+      local client_id = vim.tbl_get(prev_match, 'user_data', 'nvim', 'lsp', 'client_id')
+      if client_id and responses[client_id] ~= nil then
+        return false
+      end
+      return vim.tbl_get(prev_match, 'match')
+    end, prev_matches)
+
+    matches = vim.list_extend(prev_matches, matches)
+    local user_cmp = vim.tbl_get(buf_handles, bufnr, 'cmp')
+    if user_cmp then
+      table.sort(matches, user_cmp)
+    end
+
     local start_col = (server_start_boundary or word_boundary) + 1
     Context.cursor = { cursor_row, start_col }
     vim.fn.complete(start_col, matches)
@@ -571,7 +602,10 @@ local function on_insert_char_pre(handle)
 
   local char = api.nvim_get_vvar('char')
   local matched_clients = handle.triggers[char]
-  if not completion_timer and matched_clients then
+  -- Discard pending trigger char, complete the "latest" one.
+  -- Can happen if a mapping inputs multiple trigger chars simultaneously.
+  reset_timer()
+  if matched_clients then
     completion_timer = assert(vim.uv.new_timer())
     completion_timer:start(25, 0, function()
       reset_timer()
@@ -657,7 +691,7 @@ local function on_complete_done()
     local changedtick = vim.b[bufnr].changedtick
 
     --- @param result lsp.CompletionItem
-    client:request(ms.completionItem_resolve, completion_item, function(err, result)
+    client:request('completionItem/resolve', completion_item, function(err, result)
       if changedtick ~= vim.b[bufnr].changedtick then
         return
       end
@@ -691,6 +725,7 @@ end
 --- @class vim.lsp.completion.BufferOpts
 --- @field autotrigger? boolean  (default: false) When true, completion triggers automatically based on the server's `triggerCharacters`.
 --- @field convert? fun(item: lsp.CompletionItem): table Transforms an LSP CompletionItem to |complete-items|.
+--- @field cmp? fun(a: table, b: table): boolean Comparator for sorting merged completion items from all servers.
 
 ---@param client_id integer
 ---@param bufnr integer
@@ -698,7 +733,7 @@ end
 local function enable_completions(client_id, bufnr, opts)
   local buf_handle = buf_handles[bufnr]
   if not buf_handle then
-    buf_handle = { clients = {}, triggers = {}, convert = opts.convert }
+    buf_handle = { clients = {}, triggers = {}, convert = opts.convert, cmp = opts.cmp }
     buf_handles[bufnr] = buf_handle
 
     -- Attach to buffer events.
@@ -864,10 +899,10 @@ end
 --- - findstart=0: column where the completion starts, or -2 or -3
 --- - findstart=1: list of matches (actually just calls |complete()|)
 function M._omnifunc(findstart, base)
-  vim.lsp.log.debug('omnifunc.findstart', { findstart = findstart, base = base })
+  lsp.log.debug('omnifunc.findstart', { findstart = findstart, base = base })
   assert(base) -- silence luals
   local bufnr = api.nvim_get_current_buf()
-  local clients = lsp.get_clients({ bufnr = bufnr, method = ms.textDocument_completion })
+  local clients = lsp.get_clients({ bufnr = bufnr, method = 'textDocument/completion' })
   local remaining = #clients
   if remaining == 0 then
     return findstart == 1 and -1 or {}

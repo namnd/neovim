@@ -46,9 +46,7 @@
 #include "nvim/undo_defs.h"
 #include "nvim/vim_defs.h"
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "api/buffer.c.generated.h"
-#endif
+#include "api/buffer.c.generated.h"
 
 /// @brief <pre>help
 /// For more information on buffers, see |buffers|.
@@ -56,7 +54,7 @@
 /// Unloaded Buffers: ~
 ///
 /// Buffers may be unloaded by the |:bunload| command or the buffer's
-/// |'bufhidden'| option. When a buffer is unloaded its file contents are freed
+/// 'bufhidden' option. When a buffer is unloaded its file contents are freed
 /// from memory and vim cannot operate on the buffer lines until it is reloaded
 /// (usually by opening the buffer again in a new window). API methods such as
 /// |nvim_buf_get_lines()| and |nvim_buf_line_count()| will be affected.
@@ -111,8 +109,8 @@ Integer nvim_buf_line_count(Buffer buffer, Error *err)
 ///        Else the first notification will be `nvim_buf_changedtick_event`.
 ///        Not for Lua callbacks.
 /// @param  opts  Optional parameters.
-///             - on_lines: Lua callback invoked on change.
-///               Return a truthy value (not `false` or `nil`) to detach. Args:
+///             - on_lines: Called on linewise changes. Not called on buffer reload (`:checktime`,
+///               `:edit`, …), see `on_reload:`. Return a [lua-truthy] value to detach. Args:
 ///               - the string "lines"
 ///               - buffer id
 ///               - b:changedtick
@@ -122,10 +120,9 @@ Integer nvim_buf_line_count(Buffer buffer, Error *err)
 ///               - byte count of previous contents
 ///               - deleted_codepoints (if `utf_sizes` is true)
 ///               - deleted_codeunits (if `utf_sizes` is true)
-///             - on_bytes: Lua callback invoked on change.
-///               This callback receives more granular information about the
-///               change compared to on_lines.
-///               Return a truthy value (not `false` or `nil`) to detach. Args:
+///             - on_bytes: Called on granular changes (compared to on_lines). Not called on buffer
+///               reload (`:checktime`, `:edit`, …), see `on_reload:`. Return a [lua-truthy] value
+///               to detach. Args:
 ///               - the string "bytes"
 ///               - buffer id
 ///               - b:changedtick
@@ -141,16 +138,15 @@ Integer nvim_buf_line_count(Buffer buffer, Error *err)
 ///               - new end column of the changed text
 ///                 (if new end row = 0, offset from start column)
 ///               - new end byte length of the changed text
-///             - on_changedtick: Lua callback invoked on changedtick
-///               increment without text change. Args:
+///             - on_changedtick: Called on [changetick] increment without text change. Args:
 ///               - the string "changedtick"
 ///               - buffer id
 ///               - b:changedtick
-///             - on_detach: Lua callback invoked on detach. Args:
+///             - on_detach: Called on detach. Args:
 ///               - the string "detach"
 ///               - buffer id
-///             - on_reload: Lua callback invoked on reload. The entire buffer
-///                          content should be considered changed. Args:
+///             - on_reload: Called on whole-buffer load (`:checktime`, `:edit`, …). Clients should
+///               typically re-fetch the entire buffer contents. Args:
 ///               - the string "reload"
 ///               - buffer id
 ///             - utf_sizes: include UTF-32 and UTF-16 size of the replaced
@@ -159,7 +155,7 @@ Integer nvim_buf_line_count(Buffer buffer, Error *err)
 ///               events.
 /// @param[out] err Error details, if any
 /// @return False if attach failed (invalid parameter, or buffer isn't loaded);
-///         otherwise True. TODO: LUA_API_NO_EVAL
+///         otherwise True.
 Boolean nvim_buf_attach(uint64_t channel_id, Buffer buffer, Boolean send_buffer,
                         Dict(buf_attach) *opts, Error *err)
   FUNC_API_SINCE(4)
@@ -431,7 +427,7 @@ void nvim_buf_set_lines(uint64_t channel_id, Buffer buffer, Integer start, Integ
     // changed range, and move any in the remainder of the buffer.
     linenr_T adjust = end > start ? MAXLNUM : 0;
     mark_adjust_buf(buf, (linenr_T)start, (linenr_T)(end - 1), adjust, (linenr_T)extra,
-                    true, true, kExtmarkNOOP);
+                    true, kMarkAdjustApi, kExtmarkNOOP);
 
     extmark_splice(buf, (int)start - 1, 0, (int)(end - start), 0,
                    deleted_bytes, (int)new_len, 0, inserted_bytes,
@@ -664,7 +660,7 @@ void nvim_buf_set_text(uint64_t channel_id, Buffer buffer, Integer start_row, In
     // Do not adjust any cursors. need to use column-aware logic (below)
     linenr_T adjust = end_row >= start_row ? MAXLNUM : 0;
     mark_adjust_buf(buf, (linenr_T)start_row, (linenr_T)end_row - 1, adjust, (linenr_T)extra,
-                    true, true, kExtmarkNOOP);
+                    true, kMarkAdjustApi, kExtmarkNOOP);
 
     extmark_splice(buf, (int)start_row - 1, (colnr_T)start_col,
                    (int)(end_row - start_row), col_extent, old_byte,

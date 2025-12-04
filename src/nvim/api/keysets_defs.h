@@ -18,6 +18,8 @@ typedef struct {
   LuaRefOf(("win" _, Integer winid, Integer bufnr, Integer toprow, Integer botrow),
            *Boolean) on_win;
   LuaRefOf(("line" _, Integer winid, Integer bufnr, Integer row), *Boolean) on_line;
+  LuaRefOf(("range" _, Integer winid, Integer bufnr, Integer start_row, Integer start_col,
+            Integer end_row, Integer end_col), *Boolean) on_range;
   LuaRefOf(("end" _, Integer tick)) on_end;
   LuaRefOf(("hl_def" _)) _on_hl_def;
   LuaRefOf(("spell_nav" _)) _on_spell_nav;
@@ -60,6 +62,8 @@ typedef struct {
   Boolean undo_restore;
   String url;
   Boolean scoped;
+
+  Integer _subpriority;
 } Dict(set_extmark);
 
 typedef struct {
@@ -112,29 +116,29 @@ typedef struct {
 
 typedef struct {
   OptionalKeys is_set__win_config_;
-  Float row;
-  Float col;
-  Integer width;
-  Integer height;
-  Enum("NW", "NE", "SW", "SE") anchor;
-  Enum("cursor", "editor", "laststatus", "mouse", "tabline", "win") relative;
-  Enum("left", "right", "above", "below") split;
-  Window win;
-  ArrayOf(Integer) bufpos;
   Boolean external;
+  Boolean fixed;
   Boolean focusable;
-  Boolean mouse;
-  Boolean vertical;
-  Integer zindex;
-  Union(ArrayOf(String), Enum("none", "single", "double", "rounded", "solid", "shadow")) border;
-  Object title;
-  Enum("center", "left", "right") title_pos;
   Object footer;
   Enum("center", "left", "right") footer_pos;
+  Boolean hide;
+  Integer height;
+  Boolean mouse;
+  Enum("cursor", "editor", "laststatus", "mouse", "tabline", "win") relative;
+  Float row;
   Enum("minimal") style;
   Boolean noautocmd;
-  Boolean fixed;
-  Boolean hide;
+  Boolean vertical;
+  Window win;
+  Integer width;
+  Integer zindex;
+  Enum("NW", "NE", "SW", "SE") anchor;
+  Union(ArrayOf(String), Enum("none", "single", "double", "rounded", "solid", "shadow")) border;
+  ArrayOf(Integer) bufpos;
+  Float col;
+  Enum("left", "right", "above", "below") split;
+  Object title;
+  Enum("center", "left", "right") title_pos;
   Integer _cmdline_offset;
 } Dict(win_config);
 
@@ -336,6 +340,11 @@ typedef struct {
   Boolean err;
   Boolean verbose;
   String kind;
+  Union(Integer, String) id;
+  String title;
+  String status;
+  Integer percent;
+  DictOf(Object) data;
 } Dict(echo_opts);
 
 typedef struct {

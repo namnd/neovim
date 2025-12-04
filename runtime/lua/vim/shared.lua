@@ -244,20 +244,21 @@ function vim.tbl_values(t)
   return values
 end
 
---- Apply a function to all values of a table.
+--- Applies function `fn` to all values of table `t`, in `pairs()` iteration order (which is not
+--- guaranteed to be stable, even when the data doesn't change).
 ---
 ---@generic T
----@param func fun(value: T): any Function
+---@param fn fun(value: T): any Function
 ---@param t table<any, T> Table
 ---@return table : Table of transformed values
-function vim.tbl_map(func, t)
-  vim.validate('func', func, 'callable')
+function vim.tbl_map(fn, t)
+  vim.validate('fn', fn, 'callable')
   vim.validate('t', t, 'table')
   --- @cast t table<any,any>
 
   local rettab = {} --- @type table<any,any>
   for k, v in pairs(t) do
-    rettab[k] = func(v)
+    rettab[k] = fn(v)
   end
   return rettab
 end
@@ -265,17 +266,17 @@ end
 --- Filter a table using a predicate function
 ---
 ---@generic T
----@param func fun(value: T): boolean (function) Function
+---@param fn fun(value: T): boolean (function) Function
 ---@param t table<any, T> (table) Table
 ---@return T[] : Table of filtered values
-function vim.tbl_filter(func, t)
-  vim.validate('func', func, 'callable')
+function vim.tbl_filter(fn, t)
+  vim.validate('fn', fn, 'callable')
   vim.validate('t', t, 'table')
   --- @cast t table<any,any>
 
   local rettab = {} --- @type table<any,any>
   for _, entry in pairs(t) do
-    if func(entry) then
+    if fn(entry) then
       rettab[#rettab + 1] = entry
     end
   end
@@ -825,7 +826,7 @@ end
 ---
 ---@see https://github.com/openresty/luajit2#tableisarray
 ---
----@param t? table
+---@param t? any
 ---@return boolean `true` if array-like table, else `false`.
 function vim.isarray(t)
   if type(t) ~= 'table' then
@@ -1245,7 +1246,7 @@ end
 
 --- Returns true if object `f` can be called as a function.
 ---
----@param f any Any object
+---@param f? any Any object
 ---@return boolean `true` if `f` is callable, else `false`
 function vim.is_callable(f)
   if type(f) == 'function' then

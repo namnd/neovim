@@ -33,10 +33,8 @@
 #include "nvim/runtime.h"
 #include "nvim/types_defs.h"
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "api/private/api_metadata.generated.h"
-# include "api/private/helpers.c.generated.h"  // IWYU pragma: keep
-#endif
+#include "api/private/api_metadata.generated.h"
+#include "api/private/helpers.c.generated.h"  // IWYU pragma: keep
 
 /// Start block that may cause Vimscript exceptions while evaluating another code
 ///
@@ -232,7 +230,7 @@ Object dict_set_var(dict_T *dict, String key, Object value, bool del, bool retva
         rv = vim_to_object(&di->di_tv, arena, false);
       }
       bool type_error = false;
-      if (dict == &vimvardict
+      if (dict == get_vimvar_dict()
           && !before_set_vvar(key.data, di, &tv, true, watched, &type_error)) {
         tv_clear(&tv);
         if (type_error) {

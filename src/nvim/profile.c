@@ -12,9 +12,9 @@
 #include "nvim/cmdexpand_defs.h"
 #include "nvim/debugger.h"
 #include "nvim/errors.h"
-#include "nvim/eval.h"
 #include "nvim/eval/typval_defs.h"
 #include "nvim/eval/userfunc.h"
+#include "nvim/eval/vars.h"
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/fileio.h"
 #include "nvim/garray.h"
@@ -33,9 +33,7 @@
 #include "nvim/runtime.h"
 #include "nvim/types_defs.h"
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "profile.c.generated.h"
-#endif
+#include "profile.c.generated.h"
 
 /// Struct used in sn_prl_ga for every line of a script.
 typedef struct {

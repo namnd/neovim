@@ -149,10 +149,6 @@ describe('vim.lsp.completion: item conversion', function()
         abbr = 'foo',
         word = 'foo',
       },
-      {
-        abbr = 'bar',
-        word = 'bar',
-      },
     }
     result = vim.tbl_map(function(x)
       return {
@@ -618,21 +614,6 @@ describe('vim.lsp.completion: item conversion', function()
             },
           },
         },
-        {
-          label = 'insert_replace_edit',
-          kind = 9,
-          textEdit = {
-            newText = 'foobar',
-            insert = {
-              start = { line = 0, character = 7 },
-              ['end'] = { line = 0, character = 11 },
-            },
-            replace = {
-              start = { line = 0, character = 0 },
-              ['end'] = { line = 0, character = 0 },
-            },
-          },
-        },
       },
     }
     local expected = {
@@ -646,17 +627,6 @@ describe('vim.lsp.completion: item conversion', function()
         menu = '',
         abbr_hlgroup = '',
         word = 'this_thread',
-      },
-      {
-        abbr = 'insert_replace_edit',
-        dup = 1,
-        empty = 1,
-        icase = 1,
-        info = '',
-        kind = 'Module',
-        menu = '',
-        abbr_hlgroup = '',
-        word = 'foobar',
       },
     }
     local result = complete('  std::this|', completion_list)
@@ -806,11 +776,58 @@ describe('vim.lsp.completion: item conversion', function()
       eq('hello', text)
     end
   )
+
+  it('uses the start boundary from an insertReplace response', function()
+    local completion_list = {
+      isIncomplete = false,
+      items = {
+        {
+          data = { cacheId = 1 },
+          kind = 2,
+          label = 'foobar',
+          sortText = '11',
+          textEdit = {
+            insert = {
+              start = { character = 4, line = 4 },
+              ['end'] = { character = 8, line = 4 },
+            },
+            newText = 'foobar',
+            replace = {
+              start = { character = 4, line = 4 },
+              ['end'] = { character = 8, line = 4 },
+            },
+          },
+        },
+        {
+          data = { cacheId = 2 },
+          kind = 2,
+          label = 'bazqux',
+          sortText = '11',
+          textEdit = {
+            insert = {
+              start = { character = 4, line = 4 },
+              ['end'] = { character = 5, line = 4 },
+            },
+            newText = 'bazqux',
+            replace = {
+              start = { character = 4, line = 4 },
+              ['end'] = { character = 5, line = 4 },
+            },
+          },
+        },
+      },
+    }
+
+    local result = complete('foo.f|', completion_list)
+    eq(1, #result.items)
+    local text = result.items[1].user_data.nvim.lsp.completion_item.textEdit.newText
+    eq('foobar', text)
+  end)
 end)
 
 --- @param name string
 --- @param completion_result lsp.CompletionList
---- @param opts? {trigger_chars?: string[], resolve_result?: lsp.CompletionItem}
+--- @param opts? {trigger_chars?: string[], resolve_result?: lsp.CompletionItem, delay?: integer, cmp?: string}
 --- @return integer
 local function create_server(name, completion_result, opts)
   opts = opts or {}
@@ -824,7 +841,14 @@ local function create_server(name, completion_result, opts)
       },
       handlers = {
         ['textDocument/completion'] = function(_, _, callback)
-          callback(nil, completion_result)
+          if opts.delay then
+            -- simulate delay in completion request, needed for some of these tests
+            vim.defer_fn(function()
+              callback(nil, completion_result)
+            end, opts.delay)
+          else
+            callback(nil, completion_result)
+          end
         end,
         ['completionItem/resolve'] = function(_, _, callback)
           callback(nil, opts.resolve_result)
@@ -834,6 +858,10 @@ local function create_server(name, completion_result, opts)
 
     local bufnr = vim.api.nvim_get_current_buf()
     vim.api.nvim_win_set_buf(0, bufnr)
+    local cmp_fn
+    if opts.cmp then
+      cmp_fn = assert(loadstring(opts.cmp))
+    end
     return vim.lsp.start({
       name = name,
       cmd = server.cmd,
@@ -843,6 +871,7 @@ local function create_server(name, completion_result, opts)
           convert = function(item)
             return { abbr = item.label:gsub('%b()', '') }
           end,
+          cmp = cmp_fn,
         })
       end,
     })
@@ -862,8 +891,6 @@ describe('vim.lsp.completion: protocol', function()
       end
     end)
   end)
-
-  after_each(clear)
 
   local function assert_matches(fn)
     retry(nil, nil, function()
@@ -1037,6 +1064,34 @@ describe('vim.lsp.completion: protocol', function()
     end)
   end)
 
+  it('treats 2-triggers-at-once as "last char wins"', function()
+    local results1 = {
+      isIncomplete = false,
+      items = {
+        {
+          label = 'first',
+        },
+      },
+    }
+    create_server('dummy1', results1, { trigger_chars = { '-' } })
+    local results2 = {
+      isIncomplete = false,
+      items = {
+        {
+          label = 'second',
+        },
+      },
+    }
+    create_server('dummy2', results2, { trigger_chars = { '>' } })
+
+    feed('i->')
+
+    assert_matches(function(matches)
+      eq(1, #matches)
+      eq('second', matches[1].word)
+    end)
+  end)
+
   it('executes commands', function()
     local completion_list = {
       isIncomplete = false,
@@ -1157,6 +1212,29 @@ describe('vim.lsp.completion: protocol', function()
     end)
   end)
 
+  it('enable(…,{cmp=fn}) custom sort order', function()
+    create_server('dummy', {
+      isIncomplete = false,
+      items = {
+        { label = 'zzz', sortText = 'a' },
+        { label = 'aaa', sortText = 'z' },
+        { label = 'mmm', sortText = 'm' },
+      },
+    }, {
+      cmp = string.dump(function(a, b)
+        return a.abbr < b.abbr
+      end),
+    })
+    feed('i')
+    trigger_at_pos({ 1, 0 })
+    assert_matches(function(matches)
+      eq(3, #matches)
+      eq('aaa', matches[1].abbr)
+      eq('mmm', matches[2].abbr)
+      eq('zzz', matches[3].abbr)
+    end)
+  end)
+
   it('sends completion context when invoked', function()
     local params = exec_lua(function()
       local params
@@ -1233,8 +1311,6 @@ describe('vim.lsp.completion: integration', function()
       vim.fn.complete = vim.schedule_wrap(vim.fn.complete)
     end)
   end)
-
-  after_each(clear)
 
   it('puts cursor at the end of completed word', function()
     local completion_list = {
@@ -1317,5 +1393,51 @@ describe('vim.lsp.completion: integration', function()
         }
       end)
     )
+  end)
+end)
+
+describe("vim.lsp.completion: omnifunc + 'autocomplete'", function()
+  before_each(function()
+    clear()
+    exec_lua(create_server_definition)
+    exec_lua(function()
+      -- enable buffer and omnifunc autocompletion
+      -- omnifunc will be the lsp omnifunc
+      vim.o.complete = '.,o'
+      vim.o.autocomplete = true
+    end)
+
+    local completion_list = {
+      isIncomplete = false,
+      items = {
+        { label = 'hello' },
+        { label = 'hallo' },
+      },
+    }
+    create_server('dummy', completion_list, { delay = 50 })
+  end)
+
+  local function assert_matches(expected)
+    retry(nil, nil, function()
+      local matches = vim.tbl_map(function(m)
+        return m.word
+      end, exec_lua('return vim.fn.complete_info({ "items" })').items)
+      eq(expected, matches)
+    end)
+  end
+
+  it('merges with other completions', function()
+    feed('ihillo<cr><esc>ih')
+    assert_matches({ 'hillo', 'hallo', 'hello' })
+  end)
+
+  it('fuzzy matches without duplication', function()
+    -- wait for one completion request to start and then request another before
+    -- the first one finishes, then wait for both to finish
+    feed('ihillo<cr>h')
+    vim.uv.sleep(1)
+    feed('e')
+
+    assert_matches({ 'hello' })
   end)
 end)

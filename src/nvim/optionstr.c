@@ -13,6 +13,7 @@
 #include "nvim/cmdexpand_defs.h"
 #include "nvim/cursor.h"
 #include "nvim/cursor_shape.h"
+#include "nvim/decoration.h"
 #include "nvim/diff.h"
 #include "nvim/digraph.h"
 #include "nvim/drawscreen.h"
@@ -53,10 +54,9 @@
 #include "nvim/types_defs.h"
 #include "nvim/vim_defs.h"
 #include "nvim/window.h"
+#include "nvim/winfloat.h"
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "optionstr.c.generated.h"
-#endif
+#include "optionstr.c.generated.h"
 
 static const char e_illegal_character_after_chr[]
   = N_("E535: Illegal character after <%c>");
@@ -90,8 +90,6 @@ void didset_string_options(void)
   check_str_opt(kOptCasemap, NULL);
   check_str_opt(kOptBackupcopy, NULL);
   check_str_opt(kOptBelloff, NULL);
-  check_str_opt(kOptCompletefuzzycollect, NULL);
-  check_str_opt(kOptIsexpand, NULL);
   check_str_opt(kOptCompleteopt, NULL);
   check_str_opt(kOptSessionoptions, NULL);
   check_str_opt(kOptViewoptions, NULL);
@@ -115,6 +113,15 @@ char *illegal_char(char *errbuf, size_t errbuflen, int c)
   }
   vim_snprintf(errbuf, errbuflen, _("E539: Illegal character <%s>"),
                transchar(c));
+  return errbuf;
+}
+
+static char *illegal_char_after_chr(char *errbuf, size_t errbuflen, int c)
+{
+  if (errbuf == NULL) {
+    return "";
+  }
+  vim_snprintf(errbuf, errbuflen, _(e_illegal_character_after_chr), c);
   return errbuf;
 }
 
@@ -902,9 +909,8 @@ const char *did_set_complete(optset_T *args)
     }
     if (char_before != NUL) {
       if (args->os_errbuf != NULL) {
-        vim_snprintf(args->os_errbuf, args->os_errbuflen,
-                     _(e_illegal_character_after_chr), char_before);
-        return args->os_errbuf;
+        return illegal_char_after_chr(args->os_errbuf, args->os_errbuflen,
+                                      char_before);
       }
       return NULL;
     }
@@ -912,6 +918,10 @@ const char *did_set_complete(optset_T *args)
     while (*p == ',' || *p == ' ') {
       p++;
     }
+  }
+
+  if (set_cpt_callbacks(args) != OK) {
+    return illegal_char_after_chr(args->os_errbuf, args->os_errbuflen, 'F');
   }
   return NULL;
 }
@@ -974,10 +984,6 @@ const char *did_set_completeopt(optset_T *args FUNC_ATTR_UNUSED)
   } else if (!(args->os_flags & OPT_GLOBAL)) {
     // When using :set, clear the local flags.
     buf->b_cot_flags = 0;
-  }
-
-  if (opt_strings_flags(cot, opt_cot_values, NULL, true) != OK) {
-    return e_invarg;
   }
 
   if (opt_strings_flags(cot, opt_cot_values, flags, true) != OK) {
@@ -1375,44 +1381,6 @@ const char *did_set_inccommand(optset_T *args FUNC_ATTR_UNUSED)
     return e_invarg;
   }
   return did_set_str_generic(args);
-}
-
-/// The 'isexpand' option is changed.
-const char *did_set_isexpand(optset_T *args)
-{
-  char *ise = p_ise;
-  char *p;
-  bool last_was_comma = false;
-
-  if (args->os_flags & OPT_LOCAL) {
-    ise = curbuf->b_p_ise;
-  }
-
-  for (p = ise; *p != NUL;) {
-    if (*p == '\\' && p[1] == ',') {
-      p += 2;
-      last_was_comma = false;
-      continue;
-    }
-
-    if (*p == ',') {
-      if (last_was_comma) {
-        return e_invarg;
-      }
-      last_was_comma = true;
-      p++;
-      continue;
-    }
-
-    last_was_comma = false;
-    MB_PTR_ADV(p);
-  }
-
-  if (last_was_comma) {
-    return e_invarg;
-  }
-
-  return NULL;
 }
 
 /// The 'iskeyword' option is changed.
@@ -1891,14 +1859,20 @@ static const char *did_set_statustabline_rulerformat(optset_T *args, bool rulerf
   }
   const char *errmsg = NULL;
   char *s = *varp;
+  bool is_stl = args->os_idx == kOptStatusline;
 
   // reset statusline to default when setting global option and empty string is being set
-  if (args->os_idx == kOptStatusline
+  if (is_stl
       && ((args->os_flags & OPT_GLOBAL) || !(args->os_flags & OPT_LOCAL))
       && s[0] == NUL) {
     xfree(*varp);
     *varp = xstrdup(get_option_default(args->os_idx, args->os_flags).data.string.data);
     s = *varp;
+  }
+
+  // handle floating window statusline changes
+  if (is_stl && win && win->w_floating) {
+    win_config_float(win, win->w_config);
   }
 
   if (rulerformat && *s == '%') {
@@ -2114,16 +2088,32 @@ const char *did_set_winbar(optset_T *args)
   return did_set_statustabline_rulerformat(args, false, false);
 }
 
-/// The 'winborder' option is changed.
-const char *did_set_winborder(optset_T *args)
+static bool parse_border_opt(char *border_opt)
 {
   WinConfig fconfig = WIN_CONFIG_INIT;
   Error err = ERROR_INIT;
-  if (!parse_winborder(&fconfig, &err)) {
-    api_clear_error(&err);
-    return e_invarg;
+  bool result = true;
+  if (!parse_winborder(&fconfig, border_opt, &err)) {
+    result = false;
   }
   api_clear_error(&err);
+  return result;
+}
+
+/// The 'winborder' option is changed.
+const char *did_set_winborder(optset_T *args)
+{
+  if (!parse_border_opt(p_winborder)) {
+    return e_invarg;
+  }
+  return NULL;
+}
+
+const char *did_set_pumborder(optset_T *args)
+{
+  if (!parse_border_opt(p_pumborder)) {
+    return e_invarg;
+  }
   return NULL;
 }
 
@@ -2236,26 +2226,27 @@ struct chars_tab {
 
 static fcs_chars_T fcs_chars;
 static const struct chars_tab fcs_tab[] = {
-  CHARSTAB_ENTRY(&fcs_chars.stl,        "stl",       " ", NULL),
-  CHARSTAB_ENTRY(&fcs_chars.stlnc,      "stlnc",     " ", NULL),
-  CHARSTAB_ENTRY(&fcs_chars.wbr,        "wbr",       " ", NULL),
-  CHARSTAB_ENTRY(&fcs_chars.horiz,      "horiz",     "─", "-"),
-  CHARSTAB_ENTRY(&fcs_chars.horizup,    "horizup",   "┴", "-"),
-  CHARSTAB_ENTRY(&fcs_chars.horizdown,  "horizdown", "┬", "-"),
-  CHARSTAB_ENTRY(&fcs_chars.vert,       "vert",      "│", "|"),
-  CHARSTAB_ENTRY(&fcs_chars.vertleft,   "vertleft",  "┤", "|"),
-  CHARSTAB_ENTRY(&fcs_chars.vertright,  "vertright", "├", "|"),
-  CHARSTAB_ENTRY(&fcs_chars.verthoriz,  "verthoriz", "┼", "+"),
-  CHARSTAB_ENTRY(&fcs_chars.fold,       "fold",      "·", "-"),
-  CHARSTAB_ENTRY(&fcs_chars.foldopen,   "foldopen",  "-", NULL),
-  CHARSTAB_ENTRY(&fcs_chars.foldclosed, "foldclose", "+", NULL),
-  CHARSTAB_ENTRY(&fcs_chars.foldsep,    "foldsep",   "│", "|"),
-  CHARSTAB_ENTRY(&fcs_chars.diff,       "diff",      "-", NULL),
-  CHARSTAB_ENTRY(&fcs_chars.msgsep,     "msgsep",    " ", NULL),
-  CHARSTAB_ENTRY(&fcs_chars.eob,        "eob",       "~", NULL),
-  CHARSTAB_ENTRY(&fcs_chars.lastline,   "lastline",  "@", NULL),
-  CHARSTAB_ENTRY(&fcs_chars.trunc,      "trunc",     ">", NULL),
-  CHARSTAB_ENTRY(&fcs_chars.truncrl,    "truncrl",   "<", NULL),
+  CHARSTAB_ENTRY(&fcs_chars.stl,        "stl",       " ",  NULL),
+  CHARSTAB_ENTRY(&fcs_chars.stlnc,      "stlnc",     " ",  NULL),
+  CHARSTAB_ENTRY(&fcs_chars.wbr,        "wbr",       " ",  NULL),
+  CHARSTAB_ENTRY(&fcs_chars.horiz,      "horiz",     "─",  "-"),
+  CHARSTAB_ENTRY(&fcs_chars.horizup,    "horizup",   "┴",  "-"),
+  CHARSTAB_ENTRY(&fcs_chars.horizdown,  "horizdown", "┬",  "-"),
+  CHARSTAB_ENTRY(&fcs_chars.vert,       "vert",      "│",  "|"),
+  CHARSTAB_ENTRY(&fcs_chars.vertleft,   "vertleft",  "┤",  "|"),
+  CHARSTAB_ENTRY(&fcs_chars.vertright,  "vertright", "├",  "|"),
+  CHARSTAB_ENTRY(&fcs_chars.verthoriz,  "verthoriz", "┼",  "+"),
+  CHARSTAB_ENTRY(&fcs_chars.fold,       "fold",      "·",  "-"),
+  CHARSTAB_ENTRY(&fcs_chars.foldopen,   "foldopen",  "-",  NULL),
+  CHARSTAB_ENTRY(&fcs_chars.foldclosed, "foldclose", "+",  NULL),
+  CHARSTAB_ENTRY(&fcs_chars.foldsep,    "foldsep",   "│",  "|"),
+  CHARSTAB_ENTRY(&fcs_chars.foldinner,  "foldinner", NULL, NULL),
+  CHARSTAB_ENTRY(&fcs_chars.diff,       "diff",      "-",  NULL),
+  CHARSTAB_ENTRY(&fcs_chars.msgsep,     "msgsep",    " ",  NULL),
+  CHARSTAB_ENTRY(&fcs_chars.eob,        "eob",       "~",  NULL),
+  CHARSTAB_ENTRY(&fcs_chars.lastline,   "lastline",  "@",  NULL),
+  CHARSTAB_ENTRY(&fcs_chars.trunc,      "trunc",     ">",  NULL),
+  CHARSTAB_ENTRY(&fcs_chars.truncrl,    "truncrl",   "<",  NULL),
 };
 
 static lcs_chars_T lcs_chars;

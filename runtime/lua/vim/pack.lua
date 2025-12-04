@@ -4,13 +4,25 @@
 ---is appreciated, but expect breaking changes without notice.
 ---
 ---Manages plugins only in a dedicated [vim.pack-directory]() (see |packages|):
----`$XDG_DATA_HOME/nvim/site/pack/core/opt`.
+---`$XDG_DATA_HOME/nvim/site/pack/core/opt`. `$XDG_DATA_HOME/nvim/site` needs to
+---be part of 'packpath'. It usually is, but might not be in cases like |--clean| or
+---setting |$XDG_DATA_HOME| during startup.
 ---Plugin's subdirectory name matches plugin's name in specification.
 ---It is assumed that all plugins in the directory are managed exclusively by `vim.pack`.
 ---
----Uses Git to manage plugins and requires present `git` executable of at
----least version 2.36. Target plugins should be Git repositories with versions
----as named tags following semver convention `v<major>.<minor>.<patch>`.
+---Uses Git to manage plugins and requires present `git` executable.
+---Target plugins should be Git repositories with versions as named tags
+---following semver convention `v<major>.<minor>.<patch>`.
+---
+---The latest state of all managed plugins is stored inside a [vim.pack-lockfile]()
+---located at `$XDG_CONFIG_HOME/nvim/nvim-pack-lock.json`. It is a JSON file that
+---is used to persistently track data about plugins.
+---For a more robust config treat lockfile like its part: put under version control, etc.
+---In this case all plugins from the lockfile will be installed at once and
+---at lockfile's revision (instead of inferring from `version`).
+---Should not be edited by hand. Corrupted data for installed plugins is repaired
+---(including after deleting whole file), but `version` fields will be missing
+---for not yet added plugins.
 ---
 ---Example workflows ~
 ---
@@ -48,27 +60,33 @@
 ---```
 ---
 ---- Restart Nvim (for example, with |:restart|). Plugins that were not yet
----installed will be available on disk in target state after `add()` call.
+---installed will be available on disk after `add()` call. Their revision is
+---taken from |vim.pack-lockfile| (if present) or inferred from the `version`.
 ---
 ---- To update all plugins with new changes:
 ---    - Execute |vim.pack.update()|. This will download updates from source and
 ---      show confirmation buffer in a separate tabpage.
 ---    - Review changes. To confirm all updates execute |:write|.
 ---      To discard updates execute |:quit|.
+---    - (Optionally) |:restart| to start using code from updated plugins.
 ---
 ---Switch plugin's version:
 ---- Update 'init.lua' for plugin to have desired `version`. Let's say, plugin
 ---named 'plugin1' has changed to `vim.version.range('*')`.
----- |:restart|. The plugin's actual state on disk is not yet changed.
+---- |:restart|. The plugin's actual revision on disk is not yet changed.
+---  Only plugin's `version` in |vim.pack-lockfile| is updated.
 ---- Execute `vim.pack.update({ 'plugin1' })`.
 ---- Review changes and either confirm or discard them. If discarded, revert
 ---any changes in 'init.lua' as well or you will be prompted again next time
 ---you run |vim.pack.update()|.
 ---
+---Switch plugin's source:
+---- Update 'init.lua' for plugin to have desired `src`.
+---- |:restart|. This will cleanly reinstall plugin from the new source.
+---
 ---Freeze plugin from being updated:
----- Update 'init.lua' for plugin to have `version` set to current commit hash.
----You can get it by running `vim.pack.update({ 'plugin-name' })` and yanking
----the word describing current state (looks like `abc12345`).
+---- Update 'init.lua' for plugin to have `version` set to current revision.
+---Get it from |vim.pack-lockfile| (plugin's field `rev`; looks like `abc12345`).
 ---- |:restart|.
 ---
 ---Unfreeze plugin to start receiving updates:
@@ -76,26 +94,86 @@
 ---you want it to be updated.
 ---- |:restart|.
 ---
+---Revert plugin after an update:
+---- Locate plugin's revision at working state. For example:
+---    - If there is a previous version of |vim.pack-lockfile| (like from version
+---    control history), use it to get plugin's `rev` field.
+---    - If there is a log file ("nvim-pack.log" at "log" |stdpath()|), open it
+---      and navigate to latest updates (at the bottom). Locate lines about plugin
+---      update details and use revision from "State before".
+---- Freeze plugin to target revision (set `version` and |:restart|).
+---- Run `vim.pack.update({ 'plugin-name' }, { force = true })` to make plugin
+---  state on disk follow target revision. |:restart|.
+---- When ready to deal with updating plugin, unfreeze it.
+---
 ---Remove plugins from disk:
 ---- Use |vim.pack.del()| with a list of plugin names to remove. Make sure their specs
 ---are not included in |vim.pack.add()| call in 'init.lua' or they will be reinstalled.
 ---
---- Available events to hook into ~
+---Available events to hook into ~
 ---
---- - [PackChangedPre]() - before trying to change plugin's state.
---- - [PackChanged]() - after plugin's state has changed.
+---- [PackChangedPre]() - before trying to change plugin's state.
+---- [PackChanged]() - after plugin's state has changed.
 ---
---- Each event populates the following |event-data| fields:
---- - `kind` - one of "install" (install on disk), "update" (update existing
---- plugin), "delete" (delete from disk).
---- - `spec` - plugin's specification with defaults made explicit.
---- - `path` - full path to plugin's directory.
+---Each event populates the following |event-data| fields:
+---- `active` - whether plugin was added via |vim.pack.add()| to current session.
+---- `kind` - one of "install" (install on disk; before loading),
+---  "update" (update already installed plugin; might be not loaded),
+---  "delete" (delete from disk).
+---- `spec` - plugin's specification with defaults made explicit.
+---- `path` - full path to plugin's directory.
+---
+--- These events can be used to execute plugin hooks. For example:
+---```lua
+---local hooks = function(ev)
+---   -- Use available |event-data|
+---   local name, kind = ev.data.spec.name, ev.data.kind
+---
+---   -- Run build script after plugin's code has changed
+---   if name == 'plug-1' and (kind == 'install' or kind == 'update') then
+---     vim.system({ 'make' }, { cwd = ev.data.path })
+---   end
+---
+---   -- If action relies on code from the plugin (like user command or
+---   -- Lua code), make sure to explicitly load it first
+---   if name == 'plug-2' and kind == 'update' then
+---     if not ev.data.active then
+---       vim.cmd.packadd('plug-2')
+---     end
+---     vim.cmd('PlugTwoUpdate')
+---     require('plug2').after_update()
+---   end
+---end
+---
+----- If hooks need to run on install, run this before `vim.pack.add()`
+---vim.api.nvim_create_autocmd('PackChanged', { callback = hooks })
+---```
 
 local api = vim.api
 local uv = vim.uv
 local async = require('vim._async')
 
 local M = {}
+
+--- @class (private) vim.pack.LockData
+--- @field rev string Latest recorded revision.
+--- @field src string Plugin source.
+--- @field version? string|vim.VersionRange Plugin `version`, as supplied in `spec`.
+
+--- @class (private) vim.pack.Lock
+--- @field plugins table<string, vim.pack.LockData> Map from plugin name to its lock data.
+
+--- @type vim.pack.Lock
+local plugin_lock
+
+--- @return string
+local function get_plug_dir()
+  return vim.fs.joinpath(vim.fn.stdpath('data'), 'site', 'pack', 'core', 'opt')
+end
+
+local function lock_get_path()
+  return vim.fs.joinpath(vim.fn.stdpath('config'), 'nvim-pack-lock.json')
+end
 
 -- Git ------------------------------------------------------------------------
 
@@ -106,7 +184,9 @@ local M = {}
 local function git_cmd(cmd, cwd)
   -- Use '-c gc.auto=0' to disable `stderr` "Auto packing..." messages
   cmd = vim.list_extend({ 'git', '-c', 'gc.auto=0' }, cmd)
-  local sys_opts = { cwd = cwd, text = true, clear_env = true }
+  local env = vim.fn.environ() --- @type table<string,string>
+  env.GIT_DIR, env.GIT_WORK_TREE = nil, nil
+  local sys_opts = { cwd = cwd, text = true, env = env, clear_env = true }
   local out = async.await(3, vim.system, cmd, sys_opts) --- @type vim.SystemCompleted
   async.await(1, vim.schedule)
   if out.code ~= 0 then
@@ -121,24 +201,31 @@ local function git_cmd(cmd, cwd)
   return (stdout:gsub('\n+$', ''))
 end
 
+local git_version = vim.version.parse('1')
+
 local function git_ensure_exec()
-  if vim.fn.executable('git') == 0 then
+  local ok, sys = pcall(vim.system, { 'git', 'version' })
+  if not ok then
     error('No `git` executable')
   end
+  git_version = vim.version.parse(sys:wait().stdout)
 end
 
 --- @async
 --- @param url string
 --- @param path string
 local function git_clone(url, path)
-  local cmd = { 'clone', '--quiet', '--origin', 'origin' }
+  local cmd = { 'clone', '--quiet', '--no-checkout', '--recurse-submodules' }
 
   if vim.startswith(url, 'file://') then
     cmd[#cmd + 1] = '--no-hardlinks'
   else
-    -- NOTE: '--also-filter-submodules' requires Git>=2.36
-    local filter_args = { '--filter=blob:none', '--recurse-submodules', '--also-filter-submodules' }
-    vim.list_extend(cmd, filter_args)
+    if git_version >= vim.version.parse('2.36') then
+      cmd[#cmd + 1] = '--filter=blob:none'
+      cmd[#cmd + 1] = '--also-filter-submodules'
+    elseif git_version >= vim.version.parse('2.27') then
+      cmd[#cmd + 1] = '--filter=blob:none'
+    end
   end
 
   vim.list_extend(cmd, { '--origin', 'origin', url, path })
@@ -146,13 +233,13 @@ local function git_clone(url, path)
 end
 
 --- @async
---- @param rev string
+--- @param ref string
 --- @param cwd string
 --- @return string
-local function git_get_hash(rev, cwd)
-  -- Using `rev-list -1` shows a commit of revision, while `rev-parse` shows
-  -- hash of revision. Those are different for annotated tags.
-  return git_cmd({ 'rev-list', '-1', '--abbrev-commit', rev }, cwd)
+local function git_get_hash(ref, cwd)
+  -- Using `rev-list -1` shows a commit of reference, while `rev-parse` shows
+  -- hash of reference. Those are different for annotated tags.
+  return git_cmd({ 'rev-list', '-1', ref }, cwd)
 end
 
 --- @async
@@ -167,11 +254,14 @@ end
 --- @param cwd string
 --- @return string[]
 local function git_get_branches(cwd)
+  local def_branch = git_get_default_branch(cwd)
   local cmd = { 'branch', '--remote', '--list', '--format=%(refname:short)', '--', 'origin/**' }
   local stdout = git_cmd(cmd, cwd)
   local res = {} --- @type string[]
   for l in vim.gsplit(stdout, '\n') do
-    res[#res + 1] = l:match('^origin/(.+)$')
+    local branch = l:match('^origin/(.+)$')
+    local pos = branch == def_branch and 1 or (#res + 1)
+    table.insert(res, pos, branch)
   end
   return res
 end
@@ -180,16 +270,11 @@ end
 --- @param cwd string
 --- @return string[]
 local function git_get_tags(cwd)
-  local cmd = { 'tag', '--list', '--sort=-v:refname' }
-  return vim.split(git_cmd(cmd, cwd), '\n')
+  local tags = git_cmd({ 'tag', '--list', '--sort=-v:refname' }, cwd)
+  return tags == '' and {} or vim.split(tags, '\n')
 end
 
 -- Plugin operations ----------------------------------------------------------
-
---- @return string
-local function get_plug_dir()
-  return vim.fs.joinpath(vim.fn.stdpath('data'), 'site', 'pack', 'core', 'opt')
-end
 
 --- @param msg string|string[]
 --- @param level ('DEBUG'|'TRACE'|'INFO'|'WARN'|'ERROR')?
@@ -234,8 +319,10 @@ end
 --- - Output of |vim.version.range()| to install the greatest/last semver tag
 ---   inside the version constraint.
 --- @field version? string|vim.VersionRange
+---
+--- @field data? any Arbitrary data associated with a plugin.
 
---- @alias vim.pack.SpecResolved { src: string, name: string, version: nil|string|vim.VersionRange }
+--- @alias vim.pack.SpecResolved { src: string, name: string, version: nil|string|vim.VersionRange, data: any|nil }
 
 --- @param spec string|vim.pack.Spec
 --- @return vim.pack.SpecResolved
@@ -247,7 +334,7 @@ local function normalize_spec(spec)
   name = (type(name) == 'string' and name or ''):match('[^/]+$') or ''
   vim.validate('spec.name', name, is_nonempty_string, true, 'non-empty string')
   vim.validate('spec.version', spec.version, is_version, true, 'string or vim.VersionRange')
-  return { src = spec.src, name = name, version = spec.version }
+  return { src = spec.src, name = name, version = spec.version, data = spec.data }
 end
 
 --- @class (private) vim.pack.PlugInfo
@@ -268,11 +355,12 @@ end
 --- @field info vim.pack.PlugInfo Gathered information about plugin.
 
 --- @param spec string|vim.pack.Spec
+--- @param plug_dir string?
 --- @return vim.pack.Plug
-local function new_plug(spec)
+local function new_plug(spec, plug_dir)
   local spec_resolved = normalize_spec(spec)
-  local path = vim.fs.joinpath(get_plug_dir(), spec_resolved.name)
-  local info = { err = '', installed = uv.fs_stat(path) ~= nil }
+  local path = vim.fs.joinpath(plug_dir or get_plug_dir(), spec_resolved.name)
+  local info = { err = '', installed = plugin_lock.plugins[spec_resolved.name] ~= nil }
   return { spec = spec_resolved, path = path, info = info }
 end
 
@@ -318,72 +406,43 @@ local function normalize_plugs(plugs)
   return res
 end
 
---- @param names string[]?
+--- @param names? string[]
 --- @return vim.pack.Plug[]
 local function plug_list_from_names(names)
-  local all_plugins = M.get()
+  local p_data_list = M.get(names, { info = false })
+  local plug_dir = get_plug_dir()
   local plugs = {} --- @type vim.pack.Plug[]
-  local used_names = {} --- @type table<string,boolean>
-  -- Preserve plugin order; might be important during checkout or event trigger
-  for _, p_data in ipairs(all_plugins) do
-    -- NOTE: By default include only active plugins (and not all on disk). Using
-    -- not active plugins might lead to a confusion as default `version` and
-    -- user's desired one might mismatch.
-    -- TODO(echasnovski): Consider changing this if/when there is lockfile.
-    --- @cast names string[]
-    if (not names and p_data.active) or vim.tbl_contains(names or {}, p_data.spec.name) then
-      plugs[#plugs + 1] = new_plug(p_data.spec)
-      used_names[p_data.spec.name] = true
-    end
+  for _, p_data in ipairs(p_data_list) do
+    plugs[#plugs + 1] = new_plug(p_data.spec, plug_dir)
   end
-
-  if vim.islist(names) and #plugs ~= #names then
-    --- @param n string
-    local unused = vim.tbl_filter(function(n)
-      return not used_names[n]
-    end, names)
-    error('The following plugins are not installed: ' .. table.concat(unused, ', '))
-  end
-
   return plugs
 end
+
+--- Map from plugin path to its data.
+--- Use map and not array to avoid linear lookup during startup.
+--- @type table<string, { plug: vim.pack.Plug, id: integer }?>
+local active_plugins = {}
+local n_active_plugins = 0
 
 --- @param p vim.pack.Plug
 --- @param event_name 'PackChangedPre'|'PackChanged'
 --- @param kind 'install'|'update'|'delete'
 local function trigger_event(p, event_name, kind)
-  local data = { kind = kind, spec = vim.deepcopy(p.spec), path = p.path }
-  vim.api.nvim_exec_autocmds(event_name, { pattern = p.path, data = data })
+  local active = active_plugins[p.path] ~= nil
+  local data = { active = active, kind = kind, spec = vim.deepcopy(p.spec), path = p.path }
+  api.nvim_exec_autocmds(event_name, { pattern = p.path, data = data })
 end
 
---- @param title string
+--- @param action string
 --- @return fun(kind: 'begin'|'report'|'end', percent: integer, fmt: string, ...:any): nil
-local function new_progress_report(title)
-  -- TODO(echasnovski): currently print directly in command line because
-  -- there is no robust built-in way of showing progress:
-  -- - `vim.ui.progress()` is planned and is a good candidate to use here.
-  -- - Use `'$/progress'` implementation in 'vim.pack._lsp' if there is
-  --   a working built-in '$/progress' handler. Something like this:
-  --   ```lua
-  --   local progress_token_count = 0
-  --   function M.new_progress_report(title)
-  --     progress_token_count = progress_token_count + 1
-  --     return vim.schedule_wrap(function(kind, msg, percent)
-  --       local value = { kind = kind, message = msg, percentage = percent }
-  --       dispatchers.notification(
-  --         '$/progress',
-  --         { token = progress_token_count, value = value }
-  --       )
-  --     end
-  --   end
-  --   ```
-  -- Any of these choices is better as users can tweak how progress is shown.
+local function new_progress_report(action)
+  local progress = { kind = 'progress', title = 'vim.pack' }
 
   return vim.schedule_wrap(function(kind, percent, fmt, ...)
-    local progress = kind == 'end' and 'done' or ('%3d%%'):format(percent)
-    local details = (' %s %s'):format(title, fmt:format(...))
-    local chunks = { { 'vim.pack', 'ModeMsg' }, { ': ' }, { progress, 'WarningMsg' }, { details } }
-    vim.api.nvim_echo(chunks, true, { kind = 'progress' })
+    progress.status = kind == 'end' and 'success' or 'running'
+    progress.percent = percent
+    local msg = ('%s %s'):format(action, fmt:format(...))
+    progress.id = api.nvim_echo({ { msg } }, kind ~= 'report', progress)
     -- Force redraw to show installation progress during startup
     vim.cmd.redraw({ bang = true })
   end)
@@ -395,9 +454,9 @@ local copcall = package.loaded.jit and pcall or require('coxpcall').pcall
 --- Execute function in parallel for each non-errored plugin in the list
 --- @param plug_list vim.pack.Plug[]
 --- @param f async fun(p: vim.pack.Plug)
---- @param progress_title string
-local function run_list(plug_list, f, progress_title)
-  local report_progress = new_progress_report(progress_title)
+--- @param progress_action string
+local function run_list(plug_list, f, progress_action)
+  local report_progress = new_progress_report(progress_action)
 
   -- Construct array of functions to execute in parallel
   local n_finished = 0
@@ -436,18 +495,33 @@ local function run_list(plug_list, f, progress_title)
   report_progress('end', 100, '(%d/%d)', #funs, #funs)
 end
 
+local confirm_all = false
+
 --- @param plug_list vim.pack.Plug[]
 --- @return boolean
 local function confirm_install(plug_list)
-  local src = {} --- @type string[]
-  for _, p in ipairs(plug_list) do
-    src[#src + 1] = p.spec.src
+  if confirm_all then
+    return true
   end
-  local src_text = table.concat(src, '\n')
-  local confirm_msg = ('These plugins will be installed:\n\n%s\n'):format(src_text)
-  local res = vim.fn.confirm(confirm_msg, 'Proceed? &Yes\n&No', 1, 'Question') == 1
+
+  -- Gather pretty aligned list of plugins to install
+  local name_width, name_max_width = {}, 0 --- @type integer[], integer
+  for i, p in ipairs(plug_list) do
+    name_width[i] = api.nvim_strwidth(p.spec.name)
+    name_max_width = math.max(name_max_width, name_width[i])
+  end
+  local lines = {} --- @type string[]
+  for i, p in ipairs(plug_list) do
+    local pad = (' '):rep(name_max_width - name_width[i] + 1)
+    lines[i] = ('%s%sfrom %s'):format(p.spec.name, pad, p.spec.src)
+  end
+
+  local text = table.concat(lines, '\n')
+  local confirm_msg = ('These plugins will be installed:\n\n%s\n'):format(text)
+  local choice = vim.fn.confirm(confirm_msg, 'Proceed? &Yes\n&No\n&Always', 1, 'Question')
+  confirm_all = choice == 3
   vim.cmd.redraw()
-  return res
+  return choice ~= 2
 end
 
 --- @param tags string[]
@@ -469,7 +543,7 @@ end
 --- @param p vim.pack.Plug
 local function resolve_version(p)
   local function list_in_line(name, list)
-    return #list == 0 and '' or ('\n' .. name .. ': ' .. table.concat(list, ', '))
+    return ('\n%s: %s'):format(name, table.concat(list, ', '))
   end
 
   -- Resolve only once
@@ -518,7 +592,7 @@ end
 
 --- @async
 --- @param p vim.pack.Plug
-local function infer_states(p)
+local function infer_revisions(p)
   p.info.sha_head = p.info.sha_head or git_get_hash('HEAD', p.path)
 
   resolve_version(p)
@@ -531,21 +605,19 @@ end
 --- @async
 --- @param p vim.pack.Plug
 --- @param timestamp string
---- @param skip_same_sha boolean
-local function checkout(p, timestamp, skip_same_sha)
-  infer_states(p)
-  if skip_same_sha and p.info.sha_head == p.info.sha_target then
-    return
+local function checkout(p, timestamp)
+  infer_revisions(p)
+
+  local stash_cmd = { 'stash', '--quiet' }
+  if git_version > vim.version.parse('2.13') then
+    stash_cmd[#stash_cmd + 1] = '--message'
+    stash_cmd[#stash_cmd + 1] = ('vim.pack: %s Stash before checkout'):format(timestamp)
   end
-
-  trigger_event(p, 'PackChangedPre', 'update')
-
-  local msg = ('vim.pack: %s Stash before checkout'):format(timestamp)
-  git_cmd({ 'stash', '--quiet', '--message', msg }, p.path)
+  git_cmd(stash_cmd, p.path)
 
   git_cmd({ 'checkout', '--quiet', p.info.sha_target }, p.path)
 
-  trigger_event(p, 'PackChanged', 'update')
+  plugin_lock.plugins[p.spec.name].rev = p.info.sha_target
 
   -- (Re)Generate help tags according to the current help files.
   -- Also use `pcall()` because `:helptags` errors if there is no 'doc/'
@@ -556,15 +628,7 @@ local function checkout(p, timestamp, skip_same_sha)
 end
 
 --- @param plug_list vim.pack.Plug[]
-local function install_list(plug_list)
-  -- Get user confirmation to install plugins
-  if not confirm_install(plug_list) then
-    for _, p in ipairs(plug_list) do
-      p.info.err = 'Installation was not confirmed'
-    end
-    return
-  end
-
+local function install_list(plug_list, confirm)
   local timestamp = get_timestamp()
   --- @async
   --- @param p vim.pack.Plug
@@ -572,27 +636,37 @@ local function install_list(plug_list)
     trigger_event(p, 'PackChangedPre', 'install')
 
     git_clone(p.spec.src, p.path)
+
+    plugin_lock.plugins[p.spec.name].src = p.spec.src
+
+    -- Prefer revision from the lockfile instead of using `version`
+    p.info.sha_target = (plugin_lock.plugins[p.spec.name] or {}).rev
+
+    checkout(p, timestamp)
     p.info.installed = true
 
-    -- Infer default branch for fuller `event-data`
-    p.spec.version = p.spec.version or git_get_default_branch(p.path)
-
-    -- Do not skip checkout even if HEAD and target have same commit hash to
-    -- have new repo in expected detached HEAD state and generated help files.
-    checkout(p, timestamp, false)
-
-    -- "Install" event is triggered after "update" event intentionally to have
-    -- it indicate "plugin is installed in its correct initial version"
     trigger_event(p, 'PackChanged', 'install')
   end
-  run_list(plug_list, do_install, 'Installing plugins')
+
+  -- Install possibly after user confirmation
+  if not confirm or confirm_install(plug_list) then
+    run_list(plug_list, do_install, 'Installing plugins')
+  end
+
+  -- Ensure that not fully installed plugins are absent on disk and in lockfile
+  for _, p in ipairs(plug_list) do
+    if not (p.info.installed and uv.fs_stat(p.path) ~= nil) then
+      plugin_lock.plugins[p.spec.name] = nil
+      vim.fs.rm(p.path, { recursive = true, force = true })
+    end
+  end
 end
 
 --- @async
 --- @param p vim.pack.Plug
 local function infer_update_details(p)
   p.info.update_details = ''
-  infer_states(p)
+  infer_revisions(p)
   local sha_head = assert(p.info.sha_head)
   local sha_target = assert(p.info.sha_target)
 
@@ -617,7 +691,10 @@ local function infer_update_details(p)
     return
   end
 
-  local older_tags = git_cmd({ 'tag', '--list', '--no-contains', sha_head }, p.path)
+  local older_tags = ''
+  if git_version >= vim.version.parse('2.13') then
+    older_tags = git_cmd({ 'tag', '--list', '--no-contains', sha_head }, p.path)
+  end
   local cur_tags = git_cmd({ 'tag', '--list', '--points-at', sha_head }, p.path)
   local past_tags = vim.split(older_tags, '\n')
   vim.list_extend(past_tags, vim.split(cur_tags, '\n'))
@@ -633,14 +710,8 @@ local function infer_update_details(p)
   p.info.update_details = table.concat(newer_semver_tags, '\n')
 end
 
---- Map from plugin path to its data.
---- Use map and not array to avoid linear lookup during startup.
---- @type table<string, { plug: vim.pack.Plug, id: integer }?>
-local active_plugins = {}
-local n_active_plugins = 0
-
 --- @param plug vim.pack.Plug
---- @param load boolean
+--- @param load boolean|fun(plug_data: {spec: vim.pack.Spec, path: string})
 local function pack_add(plug, load)
   -- Add plugin only once, i.e. no overriding of spec. This allows users to put
   -- plugin first to fully control its spec.
@@ -651,11 +722,17 @@ local function pack_add(plug, load)
   n_active_plugins = n_active_plugins + 1
   active_plugins[plug.path] = { plug = plug, id = n_active_plugins }
 
+  if vim.is_callable(load) then
+    load({ spec = vim.deepcopy(plug.spec), path = plug.path })
+    return
+  end
+
   -- NOTE: The `:packadd` specifically seems to not handle spaces in dir name
   vim.cmd.packadd({ vim.fn.escape(plug.spec.name, ' '), bang = not load, magic = { file = false } })
 
-  -- Execute 'after/' scripts if not during startup (when they will be sourced
-  -- automatically), as `:packadd` only sources plain 'plugin/' files.
+  -- The `:packadd` only sources plain 'plugin/' files. Execute 'after/' scripts
+  -- if not during startup (when they will be sourced later, even if
+  -- `vim.pack.add` is inside user's 'plugin/')
   -- See https://github.com/vim/vim/issues/15584
   -- Deliberately do so after executing all currently known 'plugin/' files.
   if vim.v.vim_did_enter == 1 and load then
@@ -667,22 +744,158 @@ local function pack_add(plug, load)
   end
 end
 
+local function lock_write()
+  -- Serialize `version`
+  local lock = vim.deepcopy(plugin_lock)
+  for _, l_data in pairs(lock.plugins) do
+    local version = l_data.version
+    if version then
+      l_data.version = type(version) == 'string' and ("'%s'"):format(version) or tostring(version)
+    end
+  end
+
+  local path = lock_get_path()
+  vim.fn.mkdir(vim.fs.dirname(path), 'p')
+  local fd = assert(uv.fs_open(path, 'w', 438))
+
+  local data = vim.json.encode(lock, { indent = '  ', sort_keys = true })
+  assert(uv.fs_write(fd, data))
+  assert(uv.fs_close(fd))
+end
+
+--- @param names string[]
+local function lock_repair(names, plug_dir)
+  --- @async
+  local function f()
+    for _, name in ipairs(names) do
+      local path = vim.fs.joinpath(plug_dir, name)
+      -- Try reusing existing table to preserve maybe present `version`
+      local data = plugin_lock.plugins[name] or {}
+      data.rev = git_get_hash('HEAD', path)
+      data.src = git_cmd({ 'remote', 'get-url', 'origin' }, path)
+      plugin_lock.plugins[name] = data
+    end
+  end
+  async.run(f):wait()
+end
+
+--- Sync lockfile data and installed plugins:
+--- - Install plugins that have proper lockfile data but are not on disk.
+--- - Repair corrupted lock data for installed plugins.
+--- - Remove unrepairable corrupted lock data and plugins.
+local function lock_sync(confirm)
+  if type(plugin_lock.plugins) ~= 'table' then
+    plugin_lock.plugins = {}
+  end
+
+  -- Compute installed plugins
+  -- NOTE: The directory traversal is done on every startup, but it is very fast.
+  -- Also, single `vim.fs.dir()` scales better than on demand `uv.fs_stat()` checks.
+  local plug_dir = get_plug_dir()
+  local installed = {} --- @type table<string,string>
+  for name, fs_type in vim.fs.dir(plug_dir) do
+    installed[name] = fs_type
+    plugin_lock.plugins[name] = plugin_lock.plugins[name] or {}
+  end
+
+  -- Traverse once optimizing for "regular startup" (no repair, no install)
+  local to_install = {} --- @type vim.pack.Plug[]
+  local to_repair = {} --- @type string[]
+  local to_remove = {} --- @type string[]
+  for name, data in pairs(plugin_lock.plugins) do
+    if type(data) ~= 'table' then
+      data = {} ---@diagnostic disable-line: missing-fields
+      plugin_lock.plugins[name] = data
+    end
+
+    -- Deserialize `version`
+    local version = data.version
+    if type(version) == 'string' then
+      data.version = version:match("^'(.+)'$") or vim.version.range(version)
+    end
+
+    -- Synchronize
+    local is_bad_lock = type(data.rev) ~= 'string' or type(data.src) ~= 'string'
+    local is_bad_plugin = installed[name] and installed[name] ~= 'directory'
+    if is_bad_lock or is_bad_plugin then
+      local t = installed[name] == 'directory' and to_repair or to_remove
+      t[#t + 1] = name
+    elseif not installed[name] then
+      local spec = { src = data.src, name = name, version = data.version }
+      to_install[#to_install + 1] = new_plug(spec, plug_dir)
+    end
+  end
+
+  -- Perform actions if needed
+  if #to_install > 0 then
+    table.sort(to_install, function(a, b)
+      return a.spec.name < b.spec.name
+    end)
+    install_list(to_install, confirm)
+    lock_write()
+  end
+
+  if #to_repair > 0 then
+    lock_repair(to_repair, plug_dir)
+    table.sort(to_repair)
+    notify('Repaired corrupted lock data for plugins: ' .. table.concat(to_repair, ', '), 'WARN')
+    lock_write()
+  end
+
+  if #to_remove > 0 then
+    for _, name in ipairs(to_remove) do
+      plugin_lock.plugins[name] = nil
+      vim.fs.rm(vim.fs.joinpath(plug_dir, name), { recursive = true, force = true })
+    end
+    table.sort(to_remove)
+    notify('Removed corrupted lock data for plugins: ' .. table.concat(to_remove, ', '), 'WARN')
+    lock_write()
+  end
+end
+
+local function lock_read(confirm)
+  if plugin_lock then
+    return
+  end
+
+  local fd = uv.fs_open(lock_get_path(), 'r', 438)
+  if fd then
+    local stat = assert(uv.fs_fstat(fd))
+    local data = assert(uv.fs_read(fd, stat.size, 0))
+    assert(uv.fs_close(fd))
+    plugin_lock = vim.json.decode(data)
+  else
+    plugin_lock = { plugins = {} }
+  end
+
+  lock_sync(vim.F.if_nil(confirm, true))
+end
+
 --- @class vim.pack.keyset.add
 --- @inlinedoc
---- @field load? boolean Load `plugin/` files and `ftdetect/` scripts. If `false`, works like `:packadd!`. Default `true`.
+--- Load `plugin/` files and `ftdetect/` scripts. If `false`, works like `:packadd!`.
+--- If function, called with plugin data and is fully responsible for loading plugin.
+--- Default `false` during |init.lua| sourcing and `true` afterwards.
+--- @field load? boolean|fun(plug_data: {spec: vim.pack.Spec, path: string})
+---
+--- @field confirm? boolean Whether to ask user to confirm initial install. Default `true`.
 
 --- Add plugin to current session
 ---
 --- - For each specification check that plugin exists on disk in |vim.pack-directory|:
----     - If exists, do nothin in this step.
+---     - If exists, check if its `src` is the same as input. If not - delete
+---       immediately to clean install from the new source. Otherwise do nothing.
 ---     - If doesn't exist, install it by downloading from `src` into `name`
----       subdirectory (via `git clone`) and update state to match `version` (via `git checkout`).
---- - For each plugin execute |:packadd| making them reachable by Nvim.
+---       subdirectory (via partial blobless `git clone`) and update revision
+---       to match `version` (via `git checkout`). Plugin will not be on disk if
+---       any step resulted in an error.
+--- - For each plugin execute |:packadd| (or customizable `load` function) making
+---   it reachable by Nvim.
 ---
 --- Notes:
 --- - Installation is done in parallel, but waits for all to finish before
 ---   continuing next code execution.
---- - If plugin is already present on disk, there are no checks about its present state.
+--- - If plugin is already present on disk, there are no checks about its current revision.
 ---   The specified `version` can be not the one actually present on disk.
 ---   Execute |vim.pack.update()| to synchronize.
 --- - Adding plugin second and more times during single session does nothing:
@@ -693,22 +906,49 @@ end
 --- @param opts? vim.pack.keyset.add
 function M.add(specs, opts)
   vim.validate('specs', specs, vim.islist, false, 'list')
-  opts = vim.tbl_extend('force', { load = true }, opts or {})
+  opts = vim.tbl_extend('force', { load = vim.v.vim_did_init == 1, confirm = true }, opts or {})
   vim.validate('opts', opts, 'table')
 
-  --- @type vim.pack.Plug[]
-  local plugs = vim.tbl_map(new_plug, specs)
+  lock_read(opts.confirm)
+
+  local plug_dir = get_plug_dir()
+  local plugs = {} --- @type vim.pack.Plug[]
+  for i = 1, #specs do
+    plugs[i] = new_plug(specs[i], plug_dir)
+  end
   plugs = normalize_plugs(plugs)
 
-  -- Install
-  --- @param p vim.pack.Plug
-  local plugs_to_install = vim.tbl_filter(function(p)
-    return not p.info.installed
-  end, plugs)
+  -- Pre-process
+  local plugs_to_install = {} --- @type vim.pack.Plug[]
+  local needs_lock_write = false
+  for _, p in ipairs(plugs) do
+    -- Allow to cleanly change `src` of an already installed plugin
+    if p.info.installed and plugin_lock.plugins[p.spec.name].src ~= p.spec.src then
+      M.del({ p.spec.name })
+      p.info.installed = false
+    end
 
+    -- Detect `version` change
+    local p_lock = plugin_lock.plugins[p.spec.name] or {}
+    needs_lock_write = needs_lock_write or p_lock.version ~= p.spec.version
+    p_lock.version = p.spec.version
+    plugin_lock.plugins[p.spec.name] = p_lock
+
+    -- Register for install
+    if not p.info.installed then
+      plugs_to_install[#plugs_to_install + 1] = p
+      needs_lock_write = true
+    end
+  end
+
+  -- Install
   if #plugs_to_install > 0 then
     git_ensure_exec()
-    install_list(plugs_to_install)
+    install_list(plugs_to_install, opts.confirm)
+  end
+
+  if needs_lock_write then
+    lock_write()
   end
 
   -- Register and load those actually on disk while collecting errors
@@ -744,9 +984,9 @@ local function compute_feedback_lines_single(p)
 
   if p.info.sha_head == p.info.sha_target then
     parts[#parts + 1] = table.concat({
-      'Path:   ' .. p.path,
-      'Source: ' .. p.spec.src,
-      'State:  ' .. p.info.sha_target .. version_suffix,
+      'Path:     ' .. p.path,
+      'Source:   ' .. p.spec.src,
+      'Revision: ' .. p.info.sha_target .. version_suffix,
     }, '\n')
 
     if p.info.update_details ~= '' then
@@ -755,10 +995,10 @@ local function compute_feedback_lines_single(p)
     end
   else
     parts[#parts + 1] = table.concat({
-      'Path:         ' .. p.path,
-      'Source:       ' .. p.spec.src,
-      'State before: ' .. p.info.sha_head,
-      'State after:  ' .. p.info.sha_target .. version_suffix,
+      'Path:            ' .. p.path,
+      'Source:          ' .. p.spec.src,
+      'Revision before: ' .. p.info.sha_head,
+      'Revision after:  ' .. p.info.sha_target .. version_suffix,
       '',
       'Pending updates:',
       p.info.update_details,
@@ -813,11 +1053,11 @@ local function feedback_log(plug_list)
 end
 
 --- @param lines string[]
---- @param on_finish fun()
+--- @param on_finish fun(bufnr: integer)
 local function show_confirm_buf(lines, on_finish)
   -- Show buffer in a separate tabpage
   local bufnr = api.nvim_create_buf(true, true)
-  api.nvim_buf_set_name(bufnr, 'nvim-pack://' .. bufnr .. '/confirm-update')
+  api.nvim_buf_set_name(bufnr, 'nvim-pack://confirm#' .. bufnr)
   api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
   vim.cmd.sbuffer({ bufnr, mods = { tab = vim.fn.tabpagenr() } })
   local tab_id = api.nvim_get_current_tabpage()
@@ -833,7 +1073,7 @@ local function show_confirm_buf(lines, on_finish)
 
   -- Define action on accepting confirm
   local function finish()
-    on_finish()
+    on_finish(bufnr)
     delete_buffer()
   end
   -- - Use `nested` to allow other events (useful for statuslines)
@@ -861,6 +1101,28 @@ local function show_confirm_buf(lines, on_finish)
   vim.lsp.buf_attach_client(bufnr, require('vim.pack._lsp').client_id)
 end
 
+--- Get map of plugin names that need update based on confirmation buffer
+--- content: all plugin sections present in "# Update" section.
+--- @param bufnr integer
+--- @return table<string,boolean>
+local function get_update_map(bufnr)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  --- @type table<string,boolean>, boolean
+  local res, is_in_update = {}, false
+  for _, l in ipairs(lines) do
+    local name = l:match('^## (.+)$')
+    if name and is_in_update then
+      res[name] = true
+    end
+
+    local group = l:match('^# (%S+)')
+    if group then
+      is_in_update = group == 'Update'
+    end
+  end
+  return res
+end
+
 --- @class vim.pack.keyset.update
 --- @inlinedoc
 --- @field force? boolean Whether to skip confirmation and make updates immediately. Default `false`.
@@ -868,18 +1130,23 @@ end
 --- Update plugins
 ---
 --- - Download new changes from source.
---- - Infer update info (current/target state, changelog, etc.).
+--- - Infer update info (current/target revisions, changelog, etc.).
 --- - Depending on `force`:
 ---     - If `false`, show confirmation buffer. It lists data about all set to
 ---       update plugins. Pending changes starting with `>` will be applied while
 ---       the ones starting with `<` will be reverted.
----       It has special in-process LSP server attached to provide more interactive
----       features. Currently supported methods:
+---       It has dedicated buffer-local mappings:
+---       - |]]| and |[[| to navigate through plugin sections.
+---
+---       Some features are provided  via LSP:
 ---         - 'textDocument/documentSymbol' (`gO` via |lsp-defaults|
 ---           or |vim.lsp.buf.document_symbol()|) - show structure of the buffer.
 ---         - 'textDocument/hover' (`K` via |lsp-defaults| or |vim.lsp.buf.hover()|) -
 ---           show more information at cursor. Like details of particular pending
 ---           change or newer tag.
+---         - 'textDocument/codeAction' (`gra` via |lsp-defaults| or |vim.lsp.buf.code_action()|) -
+---           show code actions available for "plugin at cursor". Like "delete", "update",
+---           or "skip updating".
 ---
 ---       Execute |:write| to confirm update, execute |:quit| to discard the update.
 ---     - If `true`, make updates right away.
@@ -889,7 +1156,7 @@ end
 ---
 --- @param names? string[] List of plugin names to update. Must be managed
 --- by |vim.pack|, not necessarily already added to current session.
---- Default: names of all plugins added to current session via |vim.pack.add()|.
+--- Default: names of all plugins managed by |vim.pack|.
 --- @param opts? vim.pack.keyset.update
 function M.update(names, opts)
   vim.validate('names', names, vim.islist, true, 'list')
@@ -901,6 +1168,7 @@ function M.update(names, opts)
     return
   end
   git_ensure_exec()
+  lock_read()
 
   -- Perform update
   local timestamp = get_timestamp()
@@ -909,49 +1177,57 @@ function M.update(names, opts)
   --- @param p vim.pack.Plug
   local function do_update(p)
     -- Fetch
-    -- Using '--tags --force' means conflicting tags will be synced with remote
-    git_cmd(
-      { 'fetch', '--quiet', '--tags', '--force', '--recurse-submodules=yes', 'origin' },
-      p.path
-    )
+    if not opts._offline then
+      -- Using '--tags --force' means conflicting tags will be synced with remote
+      local args = { 'fetch', '--quiet', '--tags', '--force', '--recurse-submodules=yes', 'origin' }
+      git_cmd(args, p.path)
+    end
 
     -- Compute change info: changelog if any, new tags if nothing to update
     infer_update_details(p)
 
-    -- Checkout immediately if not need to confirm
-    if opts.force then
-      checkout(p, timestamp, true)
+    -- Checkout immediately if no need to confirm
+    if opts.force and p.info.sha_head ~= p.info.sha_target then
+      trigger_event(p, 'PackChangedPre', 'update')
+      checkout(p, timestamp)
+      trigger_event(p, 'PackChanged', 'update')
     end
   end
-  local progress_title = opts.force and 'Updating' or 'Downloading updates'
+  local progress_title = opts.force and (opts._offline and 'Applying updates' or 'Updating')
+    or 'Downloading updates'
   run_list(plug_list, do_update, progress_title)
 
   if opts.force then
+    lock_write()
     feedback_log(plug_list)
     return
   end
 
   -- Show report in new buffer in separate tabpage
   local lines = compute_feedback_lines(plug_list, false)
-  show_confirm_buf(lines, function()
-    -- TODO(echasnovski): Allow to not update all plugins via LSP code actions
-    --- @param p vim.pack.Plug
-    local plugs_to_checkout = vim.tbl_filter(function(p)
-      return p.info.err == '' and p.info.sha_head ~= p.info.sha_target
-    end, plug_list)
-    if #plugs_to_checkout == 0 then
+  show_confirm_buf(lines, function(bufnr)
+    local to_update = get_update_map(bufnr)
+    if not next(to_update) then
       notify('Nothing to update', 'WARN')
       return
     end
+
+    --- @param p vim.pack.Plug
+    local plugs_to_checkout = vim.tbl_filter(function(p)
+      return to_update[p.spec.name]
+    end, plug_list)
 
     local timestamp2 = get_timestamp()
     --- @async
     --- @param p vim.pack.Plug
     local function do_checkout(p)
-      checkout(p, timestamp2, true)
+      trigger_event(p, 'PackChangedPre', 'update')
+      checkout(p, timestamp2)
+      trigger_event(p, 'PackChanged', 'update')
     end
     run_list(plugs_to_checkout, do_checkout, 'Applying updates')
 
+    lock_write()
     feedback_log(plugs_to_checkout)
   end)
 end
@@ -969,6 +1245,8 @@ function M.del(names)
     return
   end
 
+  lock_read()
+
   for _, p in ipairs(plug_list) do
     trigger_event(p, 'PackChangedPre', 'delete')
 
@@ -976,19 +1254,53 @@ function M.del(names)
     active_plugins[p.path] = nil
     notify(("Removed plugin '%s'"):format(p.spec.name), 'INFO')
 
+    plugin_lock.plugins[p.spec.name] = nil
+
     trigger_event(p, 'PackChanged', 'delete')
   end
+
+  lock_write()
 end
 
 --- @inlinedoc
 --- @class vim.pack.PlugData
---- @field spec vim.pack.SpecResolved A |vim.pack.Spec| with defaults made explicit.
---- @field path string Plugin's path on disk.
 --- @field active boolean Whether plugin was added via |vim.pack.add()| to current session.
+--- @field branches? string[] Available Git branches (first is default). Missing if `info=false`.
+--- @field path string Plugin's path on disk.
+--- @field rev string Current Git revision.
+--- @field spec vim.pack.SpecResolved A |vim.pack.Spec| with resolved `name`.
+--- @field tags? string[] Available Git tags. Missing if `info=false`.
 
---- Get data about all plugins managed by |vim.pack|
+--- @class vim.pack.keyset.get
+--- @inlinedoc
+--- @field info boolean Whether to include extra plugin info. Default `true`.
+
+--- @param p_data_list vim.pack.PlugData[]
+local function add_p_data_info(p_data_list)
+  local funs = {} --- @type (async fun())[]
+  for i, p_data in ipairs(p_data_list) do
+    local path = p_data.path
+    --- @async
+    funs[i] = function()
+      p_data.branches = git_get_branches(path)
+      p_data.tags = git_get_tags(path)
+    end
+  end
+  --- @async
+  local function joined_f()
+    async.join(n_threads, funs)
+  end
+  async.run(joined_f):wait()
+end
+
+--- Gets |vim.pack| plugin info, optionally filtered by `names`.
+--- @param names? string[] List of plugin names. Default: all plugins managed by |vim.pack|.
+--- @param opts? vim.pack.keyset.get
 --- @return vim.pack.PlugData[]
-function M.get()
+function M.get(names, opts)
+  vim.validate('names', names, vim.islist, true, 'list')
+  opts = vim.tbl_extend('force', { info = true }, opts or {})
+
   -- Process active plugins in order they were added. Take into account that
   -- there might be "holes" after `vim.pack.del()`.
   local active = {} --- @type table<integer,vim.pack.Plug?>
@@ -996,34 +1308,47 @@ function M.get()
     active[p_active.id] = p_active.plug
   end
 
-  --- @type vim.pack.PlugData[]
-  local res = {}
+  lock_read()
+  local res = {} --- @type vim.pack.PlugData[]
+  local used_names = {} --- @type table<string,boolean>
   for i = 1, n_active_plugins do
-    if active[i] then
-      res[#res + 1] = { spec = vim.deepcopy(active[i].spec), path = active[i].path, active = true }
+    if active[i] and (not names or vim.tbl_contains(names, active[i].spec.name)) then
+      local name = active[i].spec.name
+      local spec = vim.deepcopy(active[i].spec)
+      local rev = (plugin_lock.plugins[name] or {}).rev
+      res[#res + 1] = { spec = spec, path = active[i].path, rev = rev, active = true }
+      used_names[name] = true
     end
   end
 
-  --- @async
-  local function do_get()
-    -- Process not active plugins
-    local plug_dir = get_plug_dir()
-    for n, t in vim.fs.dir(plug_dir, { depth = 1 }) do
-      local path = vim.fs.joinpath(plug_dir, n)
-      if t == 'directory' and not active_plugins[path] then
-        local spec = { name = n, src = git_cmd({ 'remote', 'get-url', 'origin' }, path) }
-        res[#res + 1] = { spec = spec, path = path, active = false }
-      end
-    end
-
-    -- Make default `version` explicit
-    for _, p_data in ipairs(res) do
-      if not p_data.spec.version then
-        p_data.spec.version = git_get_default_branch(p_data.path)
-      end
+  local plug_dir = get_plug_dir()
+  for name, l_data in vim.spairs(plugin_lock.plugins) do
+    local path = vim.fs.joinpath(plug_dir, name)
+    local is_in_names = not names or vim.tbl_contains(names, name)
+    if not active_plugins[path] and is_in_names then
+      local spec = { name = name, src = l_data.src, version = l_data.version }
+      res[#res + 1] = { spec = spec, path = path, rev = l_data.rev, active = false }
+      used_names[name] = true
     end
   end
-  async.run(do_get):wait()
+
+  if names ~= nil then
+    -- Align result with input
+    local names_order = {} --- @type table<string,integer>
+    for i, n in ipairs(names) do
+      if not used_names[n] then
+        error(('Plugin `%s` is not installed'):format(tostring(n)))
+      end
+      names_order[n] = i
+    end
+    table.sort(res, function(a, b)
+      return names_order[a.spec.name] < names_order[b.spec.name]
+    end)
+  end
+
+  if opts.info then
+    add_p_data_info(res)
+  end
 
   return res
 end

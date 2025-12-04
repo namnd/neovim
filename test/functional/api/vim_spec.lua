@@ -385,6 +385,9 @@ describe('API', function()
       )
       eq({ output = '' }, api.nvim_exec2('echo', { output = true }))
       eq({ output = 'foo 42' }, api.nvim_exec2('echo "foo" 42', { output = true }))
+      -- Returns output in cmdline mode #35321
+      feed(':')
+      eq({ output = 'foo 42' }, api.nvim_exec2('echo "foo" 42', { output = true }))
     end)
 
     it('displays messages when opts.output=false', function()
@@ -4613,7 +4616,7 @@ describe('API', function()
         },
       }, api.nvim_parse_cmd('4,6MyCommand! test it', {}))
     end)
-    it('works for commands separated by bar', function()
+    it('sets nextcmd for bar-separated commands', function()
       eq({
         cmd = 'argadd',
         args = { 'a.txt' },
@@ -4651,6 +4654,12 @@ describe('API', function()
           vertical = false,
         },
       }, api.nvim_parse_cmd('argadd a.txt | argadd b.txt', {}))
+    end)
+    it('sets nextcmd after expr-arg commands #36029', function()
+      local result = api.nvim_parse_cmd('exe "ls"|edit foo', {})
+      eq({ '"ls"' }, result.args)
+      eq('execute', result.cmd)
+      eq('edit foo', result.nextcmd)
     end)
     it('parses :map commands with space in RHS', function()
       eq({
@@ -4944,6 +4953,9 @@ describe('API', function()
     end)
 
     it('captures output', function()
+      eq('foo', api.nvim_cmd({ cmd = 'echo', args = { '"foo"' } }, { output = true }))
+      -- Returns output in cmdline mode #35321
+      feed(':')
       eq('foo', api.nvim_cmd({ cmd = 'echo', args = { '"foo"' } }, { output = true }))
     end)
 

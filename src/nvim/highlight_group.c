@@ -123,9 +123,7 @@ enum {
   kColorIdxBg = -4,
 };
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "highlight_group.c.generated.h"
-#endif
+#include "highlight_group.c.generated.h"
 
 static const char e_highlight_group_name_not_found_str[]
   = N_("E411: Highlight group not found: %s");
@@ -176,7 +174,12 @@ static const char *highlight_init_both[] = {
   "default link PmenuKind        Pmenu",
   "default link PmenuKindSel     PmenuSel",
   "default link PmenuSbar        Pmenu",
+  "default link PmenuBorder        Pmenu",
+  "default link PmenuShadowThrough FloatShadowThrough",
+  "default link PreInsert        Added",
   "default link ComplMatchIns    NONE",
+  "default link ComplHint        NonText",
+  "default link ComplHintMore    MoreMsg",
   "default link Substitute       Search",
   "default link StatusLineTerm   StatusLine",
   "default link StatusLineTermNC StatusLineNC",
@@ -223,6 +226,7 @@ static const char *highlight_init_both[] = {
   "default link LspReferenceTarget          LspReferenceText",
   "default link LspSignatureActiveParameter Visual",
   "default link SnippetTabstop              Visual",
+  "default link SnippetTabstopActive        SnippetTabstop",
 
   // Diagnostic
   "default link DiagnosticFloatingError    DiagnosticError",
@@ -374,8 +378,10 @@ static const char *highlight_init_light[] = {
   "MoreMsg              guifg=NvimDarkCyan                                   ctermfg=6",
   "NonText              guifg=NvimLightGrey4",
   "NormalFloat                               guibg=NvimLightGrey1",
+  "OkMsg                guifg=NvimDarkGreen                                  ctermfg=2",
   "Pmenu                                     guibg=NvimLightGrey3            cterm=reverse",
   "PmenuThumb                                guibg=NvimLightGrey4",
+  "PmenuShadow                               guibg=NvimLightGrey4            ctermbg=0 blend=100",
   "Question             guifg=NvimDarkCyan                                   ctermfg=6",
   "QuickFixLine         guifg=NvimDarkCyan                                   ctermfg=6",
   "RedrawDebugClear                          guibg=NvimLightYellow           ctermfg=15 ctermbg=3",
@@ -389,8 +395,8 @@ static const char *highlight_init_light[] = {
   "SpellCap             guisp=NvimDarkYellow gui=undercurl                   cterm=undercurl",
   "SpellLocal           guisp=NvimDarkGreen  gui=undercurl                   cterm=undercurl",
   "SpellRare            guisp=NvimDarkCyan   gui=undercurl                   cterm=undercurl",
-  "StatusLine           guifg=NvimLightGrey3 guibg=NvimDarkGrey3             cterm=reverse",
-  "StatusLineNC         guifg=NvimDarkGrey2  guibg=NvimLightGrey4            cterm=bold,underline",
+  "StatusLine           guifg=NvimDarkGrey2  guibg=NvimLightGrey4            cterm=reverse",
+  "StatusLineNC         guifg=NvimDarkGrey3  guibg=NvimLightGrey3            cterm=bold,underline",
   "Title                guifg=NvimDarkGrey2                        gui=bold  cterm=bold",
   "Visual                                    guibg=NvimLightGrey4            ctermfg=15 ctermbg=0",
   "WarningMsg           guifg=NvimDarkYellow                                 ctermfg=3",
@@ -458,8 +464,10 @@ static const char *highlight_init_dark[] = {
   "MoreMsg              guifg=NvimLightCyan                                 ctermfg=14",
   "NonText              guifg=NvimDarkGrey4",
   "NormalFloat                                guibg=NvimDarkGrey1",
+  "OkMsg                guifg=NvimLightGreen                                ctermfg=10",
   "Pmenu                                      guibg=NvimDarkGrey3           cterm=reverse",
   "PmenuThumb                                 guibg=NvimDarkGrey4",
+  "PmenuShadow                                guibg=NvimDarkGrey4           ctermbg=0 blend=100",
   "Question             guifg=NvimLightCyan                                 ctermfg=14",
   "QuickFixLine         guifg=NvimLightCyan                                 ctermfg=14",
   "RedrawDebugClear                           guibg=NvimDarkYellow          ctermfg=0 ctermbg=11",
@@ -473,8 +481,8 @@ static const char *highlight_init_dark[] = {
   "SpellCap             guisp=NvimLightYellow gui=undercurl                 cterm=undercurl",
   "SpellLocal           guisp=NvimLightGreen  gui=undercurl                 cterm=undercurl",
   "SpellRare            guisp=NvimLightCyan   gui=undercurl                 cterm=undercurl",
-  "StatusLine           guifg=NvimDarkGrey3   guibg=NvimLightGrey3          cterm=reverse",
-  "StatusLineNC         guifg=NvimLightGrey2  guibg=NvimDarkGrey4           cterm=bold,underline",
+  "StatusLine           guifg=NvimLightGrey2  guibg=NvimDarkGrey4           cterm=reverse",
+  "StatusLineNC         guifg=NvimLightGrey3  guibg=NvimDarkGrey3           cterm=bold,underline",
   "Title                guifg=NvimLightGrey2                       gui=bold cterm=bold",
   "Visual                                     guibg=NvimDarkGrey4           ctermfg=0 ctermbg=15",
   "WarningMsg           guifg=NvimLightYellow                               ctermfg=11",

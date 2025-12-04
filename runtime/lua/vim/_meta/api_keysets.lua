@@ -165,6 +165,7 @@ error('Cannot require a meta file')
 --- |'OptionSet'
 --- |'PackChanged'
 --- |'PackChangedPre'
+--- |'Progress'
 --- |'QuickFixCmdPost'
 --- |'QuickFixCmdPre'
 --- |'QuitPre'
@@ -233,6 +234,11 @@ error('Cannot require a meta file')
 --- @field err? boolean
 --- @field verbose? boolean
 --- @field kind? string
+--- @field id? integer|string
+--- @field title? string
+--- @field status? string
+--- @field percent? integer
+--- @field data? table<string,any>
 
 --- @class vim.api.keyset.empty
 
@@ -376,6 +382,7 @@ error('Cannot require a meta file')
 --- @field on_buf? fun(_: "buf", bufnr: integer, tick: integer)
 --- @field on_win? fun(_: "win", winid: integer, bufnr: integer, toprow: integer, botrow: integer): boolean?
 --- @field on_line? fun(_: "line", winid: integer, bufnr: integer, row: integer): boolean?
+--- @field on_range? fun(_: "range", winid: integer, bufnr: integer, start_row: integer, start_col: integer, end_row: integer, end_col: integer): boolean?
 --- @field on_end? fun(_: "end", tick: integer)
 --- @field _on_hl_def? fun(_: "hl_def")
 --- @field _on_spell_nav? fun(_: "spell_nav")
@@ -416,6 +423,7 @@ error('Cannot require a meta file')
 --- @field undo_restore? boolean
 --- @field url? string
 --- @field scoped? boolean
+--- @field _subpriority? integer
 
 --- @class vim.api.keyset.user_command
 --- @field addr? any
@@ -432,29 +440,29 @@ error('Cannot require a meta file')
 --- @field register? boolean
 
 --- @class vim.api.keyset.win_config
---- @field row? number
---- @field col? number
---- @field width? integer
---- @field height? integer
---- @field anchor? "NW"|"NE"|"SW"|"SE"
---- @field relative? "cursor"|"editor"|"laststatus"|"mouse"|"tabline"|"win"
---- @field split? "left"|"right"|"above"|"below"
---- @field win? integer
---- @field bufpos? integer[]
 --- @field external? boolean
+--- @field fixed? boolean
 --- @field focusable? boolean
---- @field mouse? boolean
---- @field vertical? boolean
---- @field zindex? integer
---- @field border? string[]|"none"|"single"|"double"|"rounded"|"solid"|"shadow"
---- @field title? any
---- @field title_pos? "center"|"left"|"right"
 --- @field footer? any
 --- @field footer_pos? "center"|"left"|"right"
+--- @field hide? boolean
+--- @field height? integer
+--- @field mouse? boolean
+--- @field relative? "cursor"|"editor"|"laststatus"|"mouse"|"tabline"|"win"
+--- @field row? number
 --- @field style? "minimal"
 --- @field noautocmd? boolean
---- @field fixed? boolean
---- @field hide? boolean
+--- @field vertical? boolean
+--- @field win? integer
+--- @field width? integer
+--- @field zindex? integer
+--- @field anchor? "NW"|"NE"|"SW"|"SE"
+--- @field border? string[]|"none"|"single"|"double"|"rounded"|"solid"|"shadow"
+--- @field bufpos? integer[]
+--- @field col? number
+--- @field split? "left"|"right"|"above"|"below"
+--- @field title? any
+--- @field title_pos? "center"|"left"|"right"
 --- @field _cmdline_offset? integer
 
 --- @class vim.api.keyset.win_text_height

@@ -25,6 +25,7 @@
 #include "nvim/errors.h"
 #include "nvim/eval.h"
 #include "nvim/eval/typval_defs.h"
+#include "nvim/eval/vars.h"
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/extmark.h"
@@ -65,6 +66,7 @@
 #include "nvim/plines.h"
 #include "nvim/popupmenu.h"
 #include "nvim/pos_defs.h"
+#include "nvim/register.h"
 #include "nvim/search.h"
 #include "nvim/state.h"
 #include "nvim/state_defs.h"
@@ -86,6 +88,7 @@ typedef struct {
   int mincol;
   int cmdchar;
   int cmdchar_todo;                  // cmdchar to handle once in init_prompt
+  bool ins_just_started;
   int startln;
   int count;
   int c;
@@ -102,9 +105,7 @@ typedef struct {
   bool nomove;
 } InsertState;
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "edit.c.generated.h"
-#endif
+#include "edit.c.generated.h"
 enum {
   BACKSPACE_CHAR = 1,
   BACKSPACE_WORD = 2,
@@ -144,12 +145,33 @@ static linenr_T o_lnum = 0;
 
 static kvec_t(char) replace_stack = KV_INITIAL_VALUE;
 
+#define TRIGGER_AUTOCOMPLETE() \
+  do { \
+    redraw_later(curwin, UPD_VALID); \
+    update_screen();  /* Show char deletion immediately */ \
+    ui_flush(); \
+    ins_compl_enable_autocomplete(); \
+    insert_do_complete(s); \
+    break; \
+  } while (0)
+
+#define MAY_TRIGGER_AUTOCOMPLETE(c) \
+  do { \
+    if (ins_compl_has_autocomplete() && !char_avail() && curwin->w_cursor.col > 0) { \
+      (c) = char_before_cursor(); \
+      if (vim_isprintc(c)) { \
+        TRIGGER_AUTOCOMPLETE(); \
+      } \
+    } \
+  } while (0)
+
 static void insert_enter(InsertState *s)
 {
   s->did_backspace = true;
   s->old_topfill = -1;
   s->replaceState = MODE_REPLACE;
   s->cmdchar_todo = s->cmdchar;
+  s->ins_just_started = true;
   // Remember whether editing was restarted after CTRL-O
   did_restart_edit = restart_edit;
   // sleep before redrawing, needed for "CTRL-O :" that results in an
@@ -374,31 +396,6 @@ static int insert_check(VimState *state)
 {
   InsertState *s = (InsertState *)state;
 
-  // If typed something may trigger CursorHoldI again.
-  if (s->c != K_EVENT
-      // but not in CTRL-X mode, a script can't restore the state
-      && ctrl_x_mode_normal()) {
-    did_cursorhold = false;
-  }
-
-  // Check if we need to cancel completion mode because the window
-  // or tab page was changed
-  if (ins_compl_active() && !ins_compl_win_active(curwin)) {
-    ins_compl_cancel();
-  }
-
-  // If the cursor was moved we didn't just insert a space
-  if (arrow_used) {
-    s->inserted_space = false;
-  }
-
-  if (can_cindent
-      && cindent_on()
-      && ctrl_x_mode_normal()
-      && !ins_compl_active()) {
-    insert_do_cindent(s);
-  }
-
   if (!revins_legal) {
     revins_scol = -1;     // reset on illegal motions
   } else {
@@ -532,6 +529,23 @@ static int insert_check(VimState *state)
     dont_sync_undo = kFalse;
   }
 
+  // Trigger autocomplete when entering Insert mode, either directly
+  // or via change commands like 'ciw', 'cw', etc., before the first
+  // character is typed.
+  if (s->ins_just_started) {
+    s->ins_just_started = false;
+    if (ins_compl_has_autocomplete() && !char_avail() && curwin->w_cursor.col > 0) {
+      s->c = char_before_cursor();
+      if (vim_isprintc(s->c)) {
+        ins_compl_enable_autocomplete();
+        ins_compl_init_get_longest();
+        insert_do_complete(s);
+        insert_handle_key_post(s);
+        return 1;
+      }
+    }
+  }
+
   return 1;
 }
 
@@ -607,7 +621,13 @@ static int insert_execute(VimState *state, int key)
                && (s->c == CAR || s->c == K_KENTER || s->c == NL)))
           && stop_arrow() == OK) {
         ins_compl_delete(false);
-        ins_compl_insert(false);
+        if (ins_compl_preinsert_longest() && !ins_compl_is_match_selected()) {
+          ins_compl_insert(false, true);
+          ins_compl_init_get_longest();
+          return 1;  // continue
+        } else {
+          ins_compl_insert(false, false);
+        }
       } else if (ascii_iswhite_nl_or_nul(s->c) && ins_compl_preinsert_effect()) {
         // Delete preinserted text when typing special chars
         ins_compl_delete(false);
@@ -653,6 +673,7 @@ static int insert_execute(VimState *state, int key)
 
   if ((s->c == Ctrl_V || s->c == Ctrl_Q) && ctrl_x_mode_cmdline()) {
     insert_do_complete(s);
+    insert_handle_key_post(s);
     return 1;
   }
 
@@ -671,7 +692,6 @@ static int insert_execute(VimState *state, int key)
       do_c_expr_indent();
       return 1;  // continue
     }
-
     // A key name preceded by a star means that indenting has to be
     // done before inserting the key.
     if (can_cindent && in_cinkeys(s->c, '*', s->line_is_white)
@@ -849,15 +869,8 @@ static int insert_handle_key(InsertState *s)
   case Ctrl_H:
     s->did_backspace = ins_bs(s->c, BACKSPACE_CHAR, &s->inserted_space);
     auto_format(false, true);
-    if (s->did_backspace && p_ac && !char_avail() && curwin->w_cursor.col > 0) {
-      s->c = char_before_cursor();
-      if (ins_compl_setup_autocompl(s->c)) {
-        redraw_later(curwin, UPD_VALID);
-        update_screen();  // Show char deletion immediately
-        ui_flush();
-        insert_do_complete(s);  // Trigger autocompletion
-        return 1;
-      }
+    if (s->did_backspace) {
+      MAY_TRIGGER_AUTOCOMPLETE(s->c);
     }
     break;
 
@@ -873,6 +886,9 @@ static int insert_handle_key(InsertState *s)
     }
     s->did_backspace = ins_bs(s->c, BACKSPACE_WORD, &s->inserted_space);
     auto_format(false, true);
+    if (s->did_backspace) {
+      MAY_TRIGGER_AUTOCOMPLETE(s->c);
+    }
     break;
 
   case Ctrl_U:        // delete all inserted text in current line
@@ -883,6 +899,9 @@ static int insert_handle_key(InsertState *s)
       s->did_backspace = ins_bs(s->c, BACKSPACE_LINE, &s->inserted_space);
       auto_format(false, true);
       s->inserted_space = false;
+      if (s->did_backspace) {
+        MAY_TRIGGER_AUTOCOMPLETE(s->c);
+      }
     }
     break;
 
@@ -943,7 +962,7 @@ static int insert_handle_key(InsertState *s)
     goto check_pum;
 
   case K_LUA:
-    map_execute_lua(false);
+    map_execute_lua(false, false);
 
 check_pum:
     // nvim_select_popupmenu_item() can be called from the handling of
@@ -1235,16 +1254,14 @@ normalchar:
     // closed fold.
     foldOpenCursor();
     // Trigger autocompletion
-    if (p_ac && !char_avail() && ins_compl_setup_autocompl(s->c)) {
-      redraw_later(curwin, UPD_VALID);
-      update_screen();  // Show character immediately
-      ui_flush();
-      insert_do_complete(s);
+    if (ins_compl_has_autocomplete() && !char_avail() && vim_isprintc(s->c)) {
+      TRIGGER_AUTOCOMPLETE();
     }
 
     break;
   }       // end of switch (s->c)
 
+  insert_handle_key_post(s);
   return 1;  // continue
 }
 
@@ -1268,6 +1285,31 @@ static void insert_do_cindent(InsertState *s)
       // re-indent the current line
       do_c_expr_indent();
     }
+  }
+}
+
+static void insert_handle_key_post(InsertState *s)
+{
+  // If typed something may trigger CursorHoldI again.
+  if (s->c != K_EVENT
+      // but not in CTRL-X mode, a script can't restore the state
+      && ctrl_x_mode_normal()) {
+    did_cursorhold = false;
+  }
+
+  // Check if we need to cancel completion mode because the window
+  // or tab page was changed
+  if (ins_compl_active() && !ins_compl_win_active(curwin)) {
+    ins_compl_cancel();
+  }
+
+  // If the cursor was moved we didn't just insert a space
+  if (arrow_used) {
+    s->inserted_space = false;
+  }
+
+  if (can_cindent && cindent_on() && ctrl_x_mode_normal()) {
+    insert_do_cindent(s);
   }
 }
 
@@ -1550,12 +1592,8 @@ static void init_prompt(int cmdchar_todo)
 {
   char *prompt = prompt_text();
 
-  if (curwin->w_cursor.lnum < curbuf->b_prompt_start.mark.lnum
-      || (cmdchar_todo != 'O'
-          && curwin->w_cursor.lnum == curbuf->b_prompt_start.mark.lnum
-          && (curwin->w_cursor.col < (int)strlen(prompt_text())))) {
-    curwin->w_cursor.lnum = curbuf->b_ml.ml_line_count;
-    coladvance(curwin, MAXCOL);
+  if (curwin->w_cursor.lnum < curbuf->b_prompt_start.mark.lnum) {
+    curwin->w_cursor.lnum = curbuf->b_prompt_start.mark.lnum;
   }
   char *text = get_cursor_line_ptr();
   if ((curbuf->b_prompt_start.mark.lnum == curwin->w_cursor.lnum
@@ -2440,10 +2478,10 @@ void cursor_up_inner(win_T *wp, linenr_T n, bool skip_conceal)
     while (n--) {
       // move up one line
       lnum--;
-      n += skip_conceal && decor_conceal_line(wp, lnum - 1, true);
       if (lnum <= 1) {
         break;
       }
+      n += skip_conceal && decor_conceal_line(wp, lnum - 1, true);
       // If we entered a fold, move to the beginning, unless in
       // Insert mode or when 'foldopen' contains "all": it will open
       // in a moment.
@@ -2497,10 +2535,10 @@ void cursor_down_inner(win_T *wp, int n, bool skip_conceal)
       } else {
         lnum++;
       }
-      n += skip_conceal && decor_conceal_line(wp, lnum - 1, true);
       if (lnum >= line_count) {
         break;
       }
+      n += skip_conceal && decor_conceal_line(wp, lnum - 1, true);
     }
     lnum = MIN(lnum, line_count);
   } else {
@@ -2854,6 +2892,8 @@ static void ins_reg(void)
     vim_beep(kOptBoFlagRegister);
     need_redraw = true;  // remove the '"'
   } else {
+    yankreg_T *reg = get_yank_register(regname, YREG_PASTE);
+
     if (literally == Ctrl_O || literally == Ctrl_P) {
       // Append the command to the redo buffer.
       AppendCharToRedobuff(Ctrl_R);
@@ -2862,7 +2902,11 @@ static void ins_reg(void)
 
       do_put(regname, NULL, BACKWARD, 1,
              (literally == Ctrl_P ? PUT_FIXINDENT : 0) | PUT_CURSEND);
-    } else if (insert_reg(regname, NULL, literally) == FAIL) {
+    } else if (reg->y_size > 1 && is_literal_register(regname)) {
+      AppendCharToRedobuff(Ctrl_R);
+      AppendCharToRedobuff(regname);
+      do_put(regname, NULL, BACKWARD, 1, PUT_CURSEND);
+    } else if (insert_reg(regname, NULL, !!literally) == FAIL) {
       vim_beep(kOptBoFlagRegister);
       need_redraw = true;  // remove the '"'
     } else if (stop_insert_mode) {

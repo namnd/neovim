@@ -36,9 +36,9 @@
 #include "nvim/drawscreen.h"
 #include "nvim/edit.h"
 #include "nvim/errors.h"
-#include "nvim/eval.h"
 #include "nvim/eval/typval.h"
 #include "nvim/eval/typval_defs.h"
+#include "nvim/eval/vars.h"
 #include "nvim/ex_cmds.h"
 #include "nvim/ex_cmds2.h"
 #include "nvim/ex_cmds_defs.h"
@@ -133,9 +133,7 @@ typedef struct {
   linenr_T lines_needed;  // lines needed in the preview window
 } PreviewLines;
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "ex_cmds.c.generated.h"
-#endif
+#include "ex_cmds.c.generated.h"
 
 static const char e_non_numeric_argument_to_z[]
   = N_("E144: Non-numeric argument to :z");
@@ -658,7 +656,7 @@ void ex_sort(exarg_T *eap)
   // delete the original lines if appending worked
   if (i == count) {
     for (i = 0; i < count; i++) {
-      ml_delete(eap->line1, false);
+      ml_delete(eap->line1);
     }
   } else {
     count = 0;
@@ -857,7 +855,7 @@ void ex_uniq(exarg_T *eap)
     }
 
     if (delete_lnum > 0) {
-      ml_delete(delete_lnum, false);
+      ml_delete(delete_lnum);
       i -= get_lnum - delete_lnum + 1;
       count--;
       deleted++;
@@ -1001,7 +999,7 @@ int do_move(linenr_T line1, linenr_T line2, linenr_T dest)
   }
 
   for (l = line1; l <= line2; l++) {
-    ml_delete(line1 + extra, true);
+    ml_delete_flags(line1 + extra, ML_DEL_MESSAGE);
   }
   if (!global_busy && num_lines > p_report) {
     smsg(0, NGETTEXT("%" PRId64 " line moved",
@@ -1774,7 +1772,9 @@ void ex_file(exarg_T *eap)
 /// ":update".
 void ex_update(exarg_T *eap)
 {
-  if (curbufIsChanged()) {
+  if (curbufIsChanged()
+      || (!bt_nofilename(curbuf) && curbuf->b_ffname != NULL
+          && !os_path_exists(curbuf->b_ffname))) {
     do_write(eap);
   }
 }
@@ -1805,6 +1805,15 @@ static int check_writable(const char *fname)
   return OK;
 }
 #endif
+
+static int handle_mkdir_p_arg(exarg_T *eap, char *fname)
+{
+  if (eap->mkdir_p && os_file_mkdir(fname, 0755) < 0) {
+    return FAIL;
+  }
+
+  return OK;
+}
 
 /// Write current buffer to file "eap->arg".
 /// If "eap->append" is true, append to the file.
@@ -1943,11 +1952,9 @@ int do_write(exarg_T *eap)
       fname = curbuf->b_sfname;
     }
 
-    if (eap->mkdir_p) {
-      if (os_file_mkdir(fname, 0755) < 0) {
-        retval = FAIL;
-        goto theend;
-      }
+    if (handle_mkdir_p_arg(eap, fname) == FAIL) {
+      retval = FAIL;
+      goto theend;
     }
 
     int name_was_missing = curbuf->b_ffname == NULL;
@@ -2123,7 +2130,8 @@ void do_wqall(exarg_T *eap)
     } else {
       bufref_T bufref;
       set_bufref(&bufref, buf);
-      if (buf_write_all(buf, eap->forceit) == FAIL) {
+      if (handle_mkdir_p_arg(eap, buf->b_fname) == FAIL
+          || buf_write_all(buf, eap->forceit) == FAIL) {
         error++;
       }
       // An autocommand may have deleted the buffer.
@@ -2722,13 +2730,11 @@ int do_ecmd(int fnum, char *ffname, char *sfname, exarg_T *eap, linenr_T newlnum
         goto theend;
       }
       u_unchanged(curbuf);
-      buf_updates_unload(curbuf, false);
       buf_freeall(curbuf, BFA_KEEP_UNDO);
 
       // Tell readfile() not to clear or reload undo info.
       readfile_flags = READ_KEEP_UNDO;
     } else {
-      buf_updates_unload(curbuf, false);
       buf_freeall(curbuf, 0);  // Free all things for buffer.
     }
     // If autocommands deleted the buffer we were going to re-edit, give
@@ -3079,7 +3085,7 @@ void ex_append(exarg_T *eap)
     lnum++;
 
     if (empty) {
-      ml_delete(2, false);
+      ml_delete(2);
       empty = false;
     }
   }
@@ -3130,7 +3136,7 @@ void ex_change(exarg_T *eap)
     if (curbuf->b_ml.ml_flags & ML_EMPTY) {         // nothing to delete
       break;
     }
-    ml_delete(eap->line1, false);
+    ml_delete(eap->line1);
   }
 
   // make sure the cursor is not beyond the end of the file now
@@ -3765,6 +3771,25 @@ static int do_sub(exarg_T *eap, const proftime_T timeout, const int cmdpreview_n
       bool skip_match = false;
       linenr_T sub_firstlnum;           // nr of first sub line
 
+      // Track where substitutions started (set once per line).
+      linenr_T lnum_start = 0;
+
+      // Track per-line data for each match.
+      // Will be sent as a batch to `extmark_splice` after the substitution is done.
+      typedef struct {
+        int start_col;         // Position in new text where replacement goes
+        lpos_T start;          // Match start position in original text
+        lpos_T end;            // Match end position in original text
+        int matchcols;         // Columns deleted from original text
+        bcount_t matchbytes;   // Bytes deleted from original text
+        int subcols;           // Columns in replacement text
+        bcount_t subbytes;     // Bytes in replacement text
+        linenr_T lnum_before;  // Line number before this substitution
+        linenr_T lnum_after;   // Line number after this substitution
+      } LineData;
+
+      kvec_t(LineData) line_matches = KV_INITIAL_VALUE;
+
       // The new text is build up step by step, to avoid too much
       // copying.  There are these pieces:
       // sub_firstline  The old text, unmodified.
@@ -4116,7 +4141,7 @@ static int do_sub(exarg_T *eap, const proftime_T timeout, const int cmdpreview_n
         // 3. Substitute the string. During 'inccommand' preview only do this if
         //    there is a replace pattern.
         if (cmdpreview_ns <= 0 || has_second_delim) {
-          linenr_T lnum_start = lnum;  // save the start lnum
+          lnum_start = lnum;  // save the start lnum
           int save_ma = curbuf->b_p_ma;
           int save_sandbox = sandbox;
           if (subflags.do_count) {
@@ -4206,6 +4231,9 @@ static int do_sub(exarg_T *eap, const proftime_T timeout, const int cmdpreview_n
           }
           replaced_bytes += end.col - start.col;
 
+          // Save the line number before processing newlines.
+          linenr_T lnum_before_newlines = lnum;
+
           // Now the trick is to replace CTRL-M chars with a real line
           // break.  This would make it impossible to insert a CTRL-M in
           // the text.  The line break can be avoided by preceding the
@@ -4257,9 +4285,18 @@ static int do_sub(exarg_T *eap, const proftime_T timeout, const int cmdpreview_n
             u_save_cursor();
             did_save = true;
           }
-          extmark_splice(curbuf, (int)lnum_start - 1, start_col,
-                         end.lnum - start.lnum, matchcols, replaced_bytes,
-                         lnum - lnum_start, subcols, sublen - 1, kExtmarkUndo);
+
+          // Store extmark data for this match.
+          LineData *data = kv_pushp(line_matches);
+          data->start_col = start_col;
+          data->start = start;
+          data->end = end;
+          data->matchcols = matchcols;
+          data->matchbytes = replaced_bytes;
+          data->subcols = subcols;
+          data->subbytes = sublen - 1;
+          data->lnum_before = lnum_before_newlines;
+          data->lnum_after = lnum;
         }
 
         // 4. If subflags.do_all is set, find next match.
@@ -4310,6 +4347,21 @@ skip:
             }
             ml_replace(lnum, new_start, true);
 
+            // Call extmark_splice for each match on this line.
+            for (size_t match_idx = 0; match_idx < kv_size(line_matches); match_idx++) {
+              LineData *match = &kv_A(line_matches, match_idx);
+
+              extmark_splice(curbuf, (int)match->lnum_before - 1, match->start_col,
+                             match->end.lnum - match->start.lnum, match->matchcols,
+                             match->matchbytes,
+                             match->lnum_after - match->lnum_before,
+                             match->subcols,
+                             match->subbytes, kExtmarkUndo);
+            }
+
+            // Reset the match data for the next line.
+            kv_size(line_matches) = 0;
+
             if (nmatch_tl > 0) {
               // Matched lines have now been substituted and are
               // useless, delete them.  The part after the match
@@ -4320,7 +4372,7 @@ skip:
                 break;
               }
               for (i = 0; i < nmatch_tl; i++) {
-                ml_delete(lnum, false);
+                ml_delete(lnum);
               }
               mark_adjust(lnum, lnum + nmatch_tl - 1, MAXLNUM, -nmatch_tl, kExtmarkNOOP);
               if (subflags.do_ask) {
@@ -4405,6 +4457,7 @@ skip:
       }
       xfree(new_start);              // for when substitute was cancelled
       XFREE_CLEAR(sub_firstline);    // free the copy of the original line
+      kv_destroy(line_matches);      // clean up match data
     }
 
     line_breakcheck();

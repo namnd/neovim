@@ -104,7 +104,7 @@ local function incremental_changes(state, encoding, bufnr, firstline, lastline, 
 
   local line_ending = vim.lsp._buf_get_line_ending(bufnr)
   local incremental_change = sync.compute_diff(
-    state.lines,
+    prev_lines,
     curr_lines,
     firstline,
     lastline,
@@ -199,6 +199,9 @@ function M.reset_buf(client, bufnr)
   end
   assert(state.buffers, 'CTGroupState must have buffers')
   local buf_state = state.buffers[bufnr]
+  if not buf_state then
+    return
+  end
   buf_state.refs = buf_state.refs - 1
   assert(buf_state.refs >= 0, 'refcount on buffer state must not get negative')
   if buf_state.refs == 0 then
@@ -274,7 +277,7 @@ local function send_changes(bufnr, sync_kind, state, buf_state)
   local uri = vim.uri_from_bufnr(bufnr)
   for _, client in pairs(state.clients) do
     if not client:is_stopped() and vim.lsp.buf_is_attached(bufnr, client.id) then
-      client:notify(protocol.Methods.textDocument_didChange, {
+      client:notify('textDocument/didChange', {
         textDocument = {
           uri = uri,
           version = util.buf_versions[bufnr],

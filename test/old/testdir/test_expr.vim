@@ -22,7 +22,7 @@ func Test_equal()
   call assert_false(base.method == instance.other)
   call assert_false([base.method] == [instance.other])
 
-  call assert_fails('echo base.method > instance.method')
+  call assert_fails('echo base.method > instance.method', 'E694: Invalid operation for Funcrefs')
   " Nvim doesn't have null functions
   " call assert_equal(0, test_null_function() == function('min'))
   " call assert_equal(1, test_null_function() == test_null_function())
@@ -37,12 +37,22 @@ func Test_version()
   call assert_true(has('patch-6.9.999'))
   call assert_true(has('patch-7.1.999'))
   call assert_true(has('patch-7.4.123'))
+  call assert_true(has('patch-7.4.123 ')) " Traling space can be allowed.
 
   call assert_false(has('patch-7'))
   call assert_false(has('patch-7.4'))
   call assert_false(has('patch-7.4.'))
   call assert_false(has('patch-9.1.0'))
   call assert_false(has('patch-9.9.1'))
+
+  call assert_false(has('patch-abc'))
+  call assert_false(has('patchabc'))
+
+  call assert_false(has('patch-8x001'))
+  call assert_false(has('patch-9X0X0'))
+  call assert_false(has('patch-9-0-0'))
+  call assert_false(has('patch-09.0.0'))
+  call assert_false(has('patch-9.00.0'))
 endfunc
 
 func Test_op_ternary()

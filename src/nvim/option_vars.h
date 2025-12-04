@@ -6,9 +6,7 @@
 #include "nvim/statusline_defs.h"
 #include "nvim/types_defs.h"
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "option_vars.generated.h"  // NOLINT(build/include_defs)
-#endif
+#include "option_vars.generated.h"  // NOLINT(build/include_defs)
 
 // option_vars.h: definition of global variables for settable options
 
@@ -21,7 +19,7 @@
   "R:SpellRare,L:SpellLocal,+:Pmenu,=:PmenuSel,k:PmenuMatch,<:PmenuMatchSel,[:PmenuKind," \
   "]:PmenuKindSel,{:PmenuExtra,}:PmenuExtraSel,x:PmenuSbar,X:PmenuThumb,*:TabLine,#:TabLineSel," \
   "_:TabLineFill,!:CursorColumn,.:CursorLine,o:ColorColumn,q:QuickFixLine,z:StatusLineTerm," \
-  "Z:StatusLineTermNC,g:MsgArea,h:ComplMatchIns,0:Whitespace,I:NormalNC"
+  "Z:StatusLineTermNC,g:MsgArea,h:ComplMatchIns,0:Whitespace,I:PreInsert"
 
 // Default values for 'errorformat'.
 // The "%f|%l| %m" one is used for when the contents of the quickfix window is
@@ -180,6 +178,7 @@ enum {
 #define GO_ASELML       'A'             // autoselect modeless selection
 #define GO_BOT          'b'             // use bottom scrollbar
 #define GO_CONDIALOG    'c'             // use console dialog
+#define GO_TITLEBAR     'C'             // use 'hl-TitleBar'
 #define GO_DARKTHEME    'd'             // use dark theme variant
 #define GO_TABLINE      'e'             // may show tabline
 #define GO_FORG         'f'             // start GUI in foreground
@@ -198,7 +197,7 @@ enum {
 #define GO_FOOTER       'F'             // add footer
 #define GO_VERTICAL     'v'             // arrange dialog buttons vertically
 #define GO_KEEPWINSIZE  'k'             // keep GUI window size
-#define GO_ALL "!aAbcdefFghilLmMpPrRtTvk"  // all possible flags for 'go'
+#define GO_ALL "!aAbcCdefFghilLmMpPrRtTvk"  // all possible flags for 'go'
 
 // flags for 'comments' option
 #define COM_NEST        'n'             // comments strings nest
@@ -294,18 +293,20 @@ EXTERN OptInt p_cwh;            ///< 'cmdwinheight'
 EXTERN OptInt p_ch;             ///< 'cmdheight'
 EXTERN char *p_cms;             ///< 'commentstring'
 EXTERN char *p_cpt;             ///< 'complete'
+EXTERN OptInt p_cto;            ///< 'completetimeout'
 EXTERN OptInt p_columns;        ///< 'columns'
 EXTERN int p_confirm;           ///< 'confirm'
-EXTERN char *p_cfc;             ///< 'completefuzzycollect'
-EXTERN unsigned cfc_flags;      ///< flags from 'completefuzzycollect'
 EXTERN char *p_cia;             ///< 'completeitemalign'
 EXTERN unsigned cia_flags;      ///< order flags of 'completeitemalign'
 EXTERN char *p_cot;             ///< 'completeopt'
 EXTERN unsigned cot_flags;      ///< flags from 'completeopt'
 EXTERN int p_ac;                ///< 'autocomplete'
+EXTERN OptInt p_act;            ///< 'autocompletetimeout'
+EXTERN OptInt p_acl;            ///< 'autocompletedelay'
 #ifdef BACKSLASH_IN_FILENAME
 EXTERN char *p_csl;             ///< 'completeslash'
 #endif
+EXTERN char *p_pumborder;       ///< 'pumborder'
 EXTERN OptInt p_pb;             ///< 'pumblend'
 EXTERN OptInt p_ph;             ///< 'pumheight'
 EXTERN OptInt p_pw;             ///< 'pumwidth'
@@ -378,7 +379,6 @@ EXTERN int p_is;                ///< 'incsearch'
 EXTERN char *p_inde;            ///< 'indentexpr'
 EXTERN char *p_indk;            ///< 'indentkeys'
 EXTERN char *p_icm;             ///< 'inccommand'
-EXTERN char *p_ise;             ///< 'isexpand'
 EXTERN char *p_isf;             ///< 'isfname'
 EXTERN char *p_isi;             ///< 'isident'
 EXTERN char *p_isk;             ///< 'iskeyword'

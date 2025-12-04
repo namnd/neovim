@@ -27,9 +27,7 @@
 #include "nvim/types_defs.h"
 #include "nvim/vim_defs.h"
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "cursor.c.generated.h"
-#endif
+#include "cursor.c.generated.h"
 
 /// @return  the screen position of the cursor.
 int getviscol(void)
@@ -64,8 +62,7 @@ int coladvance_force(colnr_T wcol)
     curwin->w_valid &= ~VALID_VIRTCOL;
   } else {
     // Virtcol is valid
-    curwin->w_valid |= VALID_VIRTCOL;
-    curwin->w_virtcol = wcol;
+    set_valid_virtcol(curwin, wcol);
   }
   return rc;
 }
@@ -85,8 +82,7 @@ int coladvance(win_T *wp, colnr_T wcol)
     wp->w_valid &= ~VALID_VIRTCOL;
   } else if (*(ml_get_buf(wp->w_buffer, wp->w_cursor.lnum) + wp->w_cursor.col) != TAB) {
     // Virtcol is valid when not on a TAB
-    wp->w_valid |= VALID_VIRTCOL;
-    wp->w_virtcol = wcol;
+    set_valid_virtcol(curwin, wcol);
   }
   return rc;
 }

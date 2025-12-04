@@ -12,7 +12,7 @@
 // - If it's a numeric option, add any necessary bounds checks to check_num_option_bounds().
 // - If it's a list of flags, add some code in do_set(), search for WW_ALL.
 // - Add documentation! "desc" in options.lua, and any other related places.
-// - Add an entry in runtime/optwin.vim.
+// - Add an entry in runtime/scripts/optwin.lua.
 
 #define IN_OPTION_C
 #include <assert.h>
@@ -56,6 +56,7 @@
 #include "nvim/ex_getln.h"
 #include "nvim/ex_session.h"
 #include "nvim/fold.h"
+#include "nvim/fuzzy.h"
 #include "nvim/garray.h"
 #include "nvim/garray_defs.h"
 #include "nvim/gettext_defs.h"
@@ -97,7 +98,6 @@
 #include "nvim/regexp.h"
 #include "nvim/regexp_defs.h"
 #include "nvim/runtime.h"
-#include "nvim/search.h"
 #include "nvim/spell.h"
 #include "nvim/spellfile.h"
 #include "nvim/spellsuggest.h"
@@ -111,6 +111,7 @@
 #include "nvim/undo_defs.h"
 #include "nvim/vim_defs.h"
 #include "nvim/window.h"
+#include "nvim/winfloat.h"
 
 #ifdef BACKSLASH_IN_FILENAME
 # include "nvim/arglist.h"
@@ -157,18 +158,14 @@ typedef enum {
   PREFIX_INV,     ///< "inv" prefix
 } set_prefix_T;
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "option.c.generated.h"
-#endif
+#include "option.c.generated.h"
 
 // options[] is initialized in options.generated.h.
 // The options with a NULL variable are 'hidden': a set command for them is
 // ignored and they are not printed.
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "options.generated.h"
-# include "options_map.generated.h"
-#endif
+#include "options.generated.h"
+#include "options_map.generated.h"
 
 static int p_bin_dep_opts[] = {
   kOptTextwidth, kOptWrapmargin, kOptModeline, kOptExpandtab, kOptInvalid
@@ -388,6 +385,7 @@ void set_init_1(bool clean_arg)
   set_options_default(0);
 
   curbuf->b_p_initialized = true;
+  curbuf->b_p_ac = -1;
   curbuf->b_p_ar = -1;          // no local 'autoread' value
   curbuf->b_p_ul = NO_LOCAL_UNDOLEVEL;
   check_buf_options(curbuf);
@@ -490,6 +488,7 @@ static void change_option_default(const OptIndex opt_idx, OptVal value)
 /// @param  opt_flags  Option flags (can be OPT_LOCAL, OPT_GLOBAL or a combination).
 static void set_option_default(const OptIndex opt_idx, int opt_flags)
 {
+  bool both = (opt_flags & (OPT_LOCAL | OPT_GLOBAL)) == 0;
   OptVal def_val = get_option_default(opt_idx, opt_flags);
   set_option_direct(opt_idx, def_val, opt_flags, current_sctx.sc_sid);
 
@@ -500,6 +499,10 @@ static void set_option_default(const OptIndex opt_idx, int opt_flags)
   // The default value is not insecure.
   uint32_t *flagsp = insecure_flag(curwin, opt_idx, opt_flags);
   *flagsp = *flagsp & ~(unsigned)kOptFlagInsecure;
+  if (both) {
+    flagsp = insecure_flag(curwin, opt_idx, OPT_LOCAL);
+    *flagsp = *flagsp & ~(unsigned)kOptFlagInsecure;
+  }
 }
 
 /// Set all options (except terminal options) to their default value.
@@ -1647,6 +1650,8 @@ uint32_t *insecure_flag(win_T *const wp, OptIndex opt_idx, int opt_flags)
   if (opt_flags & OPT_LOCAL) {
     assert(wp != NULL);
     switch (opt_idx) {
+    case kOptWrap:
+      return &wp->w_p_wrap_flags;
     case kOptStatusline:
       return &wp->w_p_stl_flags;
     case kOptWinbar:
@@ -1661,6 +1666,18 @@ uint32_t *insecure_flag(win_T *const wp, OptIndex opt_idx, int opt_flags)
       return &wp->w_buffer->b_p_fex_flags;
     case kOptIncludeexpr:
       return &wp->w_buffer->b_p_inex_flags;
+    default:
+      break;
+    }
+  } else {
+    // For global value of window-local options, use flags in w_allbuf_opt.
+    switch (opt_idx) {
+    case kOptWrap:
+      return &wp->w_allbuf_opt.wo_wrap_flags;
+    case kOptFoldexpr:
+      return &wp->w_allbuf_opt.wo_fde_flags;
+    case kOptFoldtext:
+      return &wp->w_allbuf_opt.wo_fdt_flags;
     default:
       break;
     }
@@ -2098,7 +2115,9 @@ static const char *did_set_laststatus(optset_T *args)
     win_comp_pos();
   }
 
+  status_redraw_curbuf();
   last_status(false);  // (re)set last window status line.
+  win_float_update_statusline();
   return NULL;
 }
 
@@ -2995,8 +3014,6 @@ bool is_tty_option(const char *name)
   return find_tty_option_end(name) != NULL;
 }
 
-#define TCO_BUFFER_SIZE 8
-
 /// Get value of TTY option.
 ///
 /// @param  name  Name of TTY option.
@@ -3010,8 +3027,8 @@ OptVal get_tty_option(const char *name)
     if (t_colors <= 1) {
       value = xstrdup("");
     } else {
-      value = xmalloc(TCO_BUFFER_SIZE);
-      snprintf(value, TCO_BUFFER_SIZE, "%d", t_colors);
+      value = xmalloc(NUMBUFLEN);
+      snprintf(value, NUMBUFLEN, "%d", t_colors);
     }
   } else if (strequal(name, "term")) {
     value = p_term ? xstrdup(p_term) : xstrdup("nvim");
@@ -3371,6 +3388,7 @@ static OptVal get_option_unset_value(OptIndex opt_idx)
     }
 
     switch (opt_idx) {
+    case kOptAutocomplete:
     case kOptAutoread:
       return BOOLEAN_OPTVAL(kNone);
     case kOptScrolloff:
@@ -3556,15 +3574,22 @@ static const char *did_set_option(OptIndex opt_idx, void *varp, OptVal old_value
   check_redraw(opt->flags);
 
   if (errmsg == NULL) {
-    uint32_t *p = insecure_flag(curwin, opt_idx, opt_flags);
     opt->flags |= kOptFlagWasSet;
 
-    // When an option is set in the sandbox, from a modeline or in secure mode set the kOptFlagInsecure
-    // flag.  Otherwise, if a new value is stored reset the flag.
+    uint32_t *flagsp = insecure_flag(curwin, opt_idx, opt_flags);
+    uint32_t *flagsp_local = scope_both ? insecure_flag(curwin, opt_idx, OPT_LOCAL) : NULL;
+    // When an option is set in the sandbox, from a modeline or in secure mode set the
+    // kOptFlagInsecure flag.  Otherwise, if a new value is stored reset the flag.
     if (!value_checked && (secure || sandbox != 0 || (opt_flags & OPT_MODELINE))) {
-      *p |= kOptFlagInsecure;
+      *flagsp |= kOptFlagInsecure;
+      if (flagsp_local != NULL) {
+        *flagsp_local |= kOptFlagInsecure;
+      }
     } else if (value_replaced) {
-      *p &= ~(unsigned)kOptFlagInsecure;
+      *flagsp &= ~(unsigned)kOptFlagInsecure;
+      if (flagsp_local != NULL) {
+        *flagsp_local &= ~(unsigned)kOptFlagInsecure;
+      }
     }
   }
 
@@ -4424,6 +4449,8 @@ void *get_varp_scope_from(vimoption_T *p, int opt_flags, buf_T *buf, win_T *win)
       return &(buf->b_p_kp);
     case kOptPath:
       return &(buf->b_p_path);
+    case kOptAutocomplete:
+      return &(buf->b_p_ac);
     case kOptAutoread:
       return &(buf->b_p_ar);
     case kOptTags:
@@ -4440,8 +4467,6 @@ void *get_varp_scope_from(vimoption_T *p, int opt_flags, buf_T *buf, win_T *win)
       return &(buf->b_p_inc);
     case kOptCompleteopt:
       return &(buf->b_p_cot);
-    case kOptIsexpand:
-      return &(buf->b_p_ise);
     case kOptDictionary:
       return &(buf->b_p_dict);
     case kOptDiffanchors:
@@ -4511,6 +4536,8 @@ void *get_varp_from(vimoption_T *p, buf_T *buf, win_T *win)
     return *buf->b_p_kp != NUL ? &buf->b_p_kp : p->var;
   case kOptPath:
     return *buf->b_p_path != NUL ? &(buf->b_p_path) : p->var;
+  case kOptAutocomplete:
+    return buf->b_p_ac >= 0 ? &(buf->b_p_ac) : p->var;
   case kOptAutoread:
     return buf->b_p_ar >= 0 ? &(buf->b_p_ar) : p->var;
   case kOptTags:
@@ -4529,8 +4556,6 @@ void *get_varp_from(vimoption_T *p, buf_T *buf, win_T *win)
     return *buf->b_p_inc != NUL ? &(buf->b_p_inc) : p->var;
   case kOptCompleteopt:
     return *buf->b_p_cot != NUL ? &(buf->b_p_cot) : p->var;
-  case kOptIsexpand:
-    return *buf->b_p_ise != NUL ? &(buf->b_p_ise) : p->var;
   case kOptDictionary:
     return *buf->b_p_dict != NUL ? &(buf->b_p_dict) : p->var;
   case kOptDiffanchors:
@@ -4910,6 +4935,12 @@ void copy_winopt(winopt_T *from, winopt_T *to)
   to->wo_winbl = from->wo_winbl;
   to->wo_stc = copy_option_val(from->wo_stc);
 
+  to->wo_wrap_flags = from->wo_wrap_flags;
+  to->wo_stl_flags = from->wo_stl_flags;
+  to->wo_wbr_flags = from->wo_wbr_flags;
+  to->wo_fde_flags = from->wo_fde_flags;
+  to->wo_fdt_flags = from->wo_fdt_flags;
+
   // Copy the script context so that we know were the value was last set.
   memmove(to->wo_script_ctx, from->wo_script_ctx, sizeof(to->wo_script_ctx));
   check_winopt(to);             // don't want NULL pointers
@@ -5109,6 +5140,7 @@ void buf_copy_options(buf_T *buf, int flags)
       }
       buf->b_p_cpt = xstrdup(p_cpt);
       COPY_OPT_SCTX(buf, kBufOptComplete);
+      set_buflocal_cpt_callbacks(buf);
 #ifdef BACKSLASH_IN_FILENAME
       buf->b_p_csl = xstrdup(p_csl);
       COPY_OPT_SCTX(buf, kBufOptCompleteslash);
@@ -5206,6 +5238,7 @@ void buf_copy_options(buf_T *buf, int flags)
 
       // options that are normally global but also have a local value
       // are not copied, start using the global value
+      buf->b_p_ac = -1;
       buf->b_p_ar = -1;
       buf->b_p_ul = NO_LOCAL_UNDOLEVEL;
       buf->b_p_bkc = empty_string_option;
@@ -5230,7 +5263,6 @@ void buf_copy_options(buf_T *buf, int flags)
       buf->b_p_dict = empty_string_option;
       buf->b_p_dia = empty_string_option;
       buf->b_p_tsr = empty_string_option;
-      buf->b_p_ise = empty_string_option;
       buf->b_p_tsrfu = empty_string_option;
       buf->b_p_qe = xstrdup(p_qe);
       COPY_OPT_SCTX(buf, kBufOptQuoteescape);
@@ -5577,7 +5609,7 @@ static bool match_str(char *const str, regmatch_T *const regmatch, char **const 
     }
   } else {
     const int score = fuzzy_match_str(str, fuzzystr);
-    if (score != 0) {
+    if (score != FUZZY_SCORE_NONE) {
       if (!test_only) {
         fuzmatch[idx].idx = idx;
         fuzmatch[idx].str = xstrdup(str);

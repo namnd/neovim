@@ -3,10 +3,10 @@
 " Maintainer: Andis Sprinkis <andis@sprinkis.com>
 " Former Maintainer: Cameron Wright
 " URL: https://github.com/andis-sprinkis/lf-vim
-" Last Change: 16 July 2025
+" Last Change: 26 Oct 2025
 "
 " The shell syntax highlighting is configurable. See $VIMRUNTIME/doc/syntax.txt
-" lf version: 36
+" lf version: 39
 
 if exists("b:current_syntax") | finish | endif
 
@@ -56,12 +56,14 @@ syn keyword lfOptions
   \ cmd-history-next
   \ cmd-history-prev
   \ cmd-home
+  \ cmd-insert
   \ cmd-interrupt
   \ cmd-left
   \ cmd-lowercase-word
   \ cmd-menu-accept
   \ cmd-menu-complete
   \ cmd-menu-complete-back
+  \ cmd-menu-discard
   \ cmd-right
   \ cmd-transpose
   \ cmd-transpose-word
@@ -78,12 +80,10 @@ syn keyword lfOptions
   \ cut
   \ cutfmt
   \ delete
-  \ dircache
   \ dircounts
   \ dirfirst
   \ dironly
   \ dirpreviews
-  \ doc
   \ down
   \ draw
   \ drawbox
@@ -94,6 +94,7 @@ syn keyword lfOptions
   \ errorfmt
   \ filesep
   \ filter
+  \ filtermethod
   \ find
   \ find-back
   \ find-next
@@ -101,10 +102,9 @@ syn keyword lfOptions
   \ findlen
   \ glob-select
   \ glob-unselect
-  \ globfilter
-  \ globsearch
   \ half-down
   \ half-up
+  \ help
   \ hidden
   \ hiddenfiles
   \ high
@@ -122,12 +122,14 @@ syn keyword lfOptions
   \ jump-next
   \ jump-prev
   \ load
-  \ locale
   \ low
   \ maps
   \ mark-load
   \ mark-remove
   \ mark-save
+  \ menufmt
+  \ menuheaderfmt
+  \ menuselectfmt
   \ middle
   \ mouse
   \ nmaps
@@ -147,6 +149,7 @@ syn keyword lfOptions
   \ paste
   \ period
   \ pre-cd
+  \ preload
   \ preserve
   \ preview
   \ previewer
@@ -161,6 +164,7 @@ syn keyword lfOptions
   \ rename
   \ reverse
   \ roundbox
+  \ rulerfile
   \ rulerfmt
   \ scroll-down
   \ scroll-up
@@ -169,6 +173,7 @@ syn keyword lfOptions
   \ search-back
   \ search-next
   \ search-prev
+  \ searchmethod
   \ select
   \ selectfmt
   \ selmode
@@ -180,7 +185,7 @@ syn keyword lfOptions
   \ shellflag
   \ shellopts
   \ showbinds
-  \ sixel
+  \ sizeunits
   \ smartcase
   \ smartdia
   \ sortby

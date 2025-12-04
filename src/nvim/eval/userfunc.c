@@ -56,9 +56,7 @@
 #include "nvim/ui_defs.h"
 #include "nvim/vim_defs.h"
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "eval/userfunc.c.generated.h"
-#endif
+#include "eval/userfunc.c.generated.h"
 
 /// structure used as item in "fc_defer"
 typedef struct {
@@ -283,7 +281,7 @@ static ufunc_T *alloc_ufunc(const char *name, size_t namelen)
 {
   size_t len = offsetof(ufunc_T, uf_name) + namelen + 1;
   ufunc_T *fp = xcalloc(1, len);
-  STRCPY(fp->uf_name, name);
+  xmemcpyz(fp->uf_name, name, namelen);
   fp->uf_namelen = namelen;
 
   if ((uint8_t)name[0] == K_SPECIAL) {
@@ -417,10 +415,7 @@ int get_lambda_tv(char **arg, typval_T *rettv, evalarg_T *evalarg)
 
 errret:
   ga_clear_strings(&newargs);
-  if (fp != NULL) {
-    xfree(fp->uf_name_exp);
-    xfree(fp);
-  }
+  assert(fp == NULL);
   xfree(pt);
   if (evalarg != NULL && evalarg->eval_tofree == NULL) {
     evalarg->eval_tofree = tofree;
@@ -2500,19 +2495,14 @@ static int get_function_body(exarg_T *eap, garray_T *newlines, char *line_arg_in
       }
 
       // Check for ":append", ":change", ":insert".
-      p = skip_range(p, NULL);
-      if ((p[0] == 'a' && (!ASCII_ISALPHA(p[1]) || p[1] == 'p'))
-          || (p[0] == 'c'
-              && (!ASCII_ISALPHA(p[1])
-                  || (p[1] == 'h' && (!ASCII_ISALPHA(p[2])
-                                      || (p[2] == 'a'
-                                          && (strncmp(&p[3], "nge", 3) != 0
-                                              || !ASCII_ISALPHA(p[6])))))))
-          || (p[0] == 'i'
-              && (!ASCII_ISALPHA(p[1]) || (p[1] == 'n'
-                                           && (!ASCII_ISALPHA(p[2])
-                                               || (p[2] == 's')))))) {
+      char *const tp = p = skip_range(p, NULL);
+      if ((checkforcmd(&p, "append", 1)
+           || checkforcmd(&p, "change", 1)
+           || checkforcmd(&p, "insert", 1))
+          && (*p == '!' || *p == '|' || ascii_iswhite_nl_or_nul(*p))) {
         skip_until = xmemdupz(".", 1);
+      } else {
+        p = tp;
       }
 
       // heredoc: Check for ":python <<EOF", ":lua <<EOF", etc.
@@ -2584,6 +2574,7 @@ static int get_function_body(exarg_T *eap, garray_T *newlines, char *line_arg_in
               heredoc_trimmedlen = (size_t)(skipwhite(theline) - theline);
               heredoc_trimmed = xmemdupz(theline, heredoc_trimmedlen);
             }
+            XFREE_CLEAR(skip_until);
             skip_until = xmemdupz(p, (size_t)(skiptowhite(p) - p));
             do_concat = false;
             is_heredoc = true;
@@ -3915,50 +3906,66 @@ funccall_T *get_funccal(void)
   return funccal;
 }
 
+/// @return  dict used for local variables in the current funccal or
+///          NULL if there is no current funccal.
+dict_T *get_funccal_local_dict(void)
+{
+  if (current_funccal == NULL || current_funccal->fc_l_vars.dv_refcount == 0) {
+    return NULL;
+  }
+  return &get_funccal()->fc_l_vars;
+}
+
 /// @return  hashtable used for local variables in the current funccal or
 ///          NULL if there is no current funccal.
 hashtab_T *get_funccal_local_ht(void)
 {
-  if (current_funccal == NULL) {
-    return NULL;
-  }
-  return &get_funccal()->fc_l_vars.dv_hashtab;
+  dict_T *d = get_funccal_local_dict();
+  return d != NULL ? &d->dv_hashtab : NULL;
 }
 
 /// @return   the l: scope variable or
 ///           NULL if there is no current funccal.
 dictitem_T *get_funccal_local_var(void)
 {
-  if (current_funccal == NULL) {
+  if (current_funccal == NULL || current_funccal->fc_l_vars.dv_refcount == 0) {
     return NULL;
   }
   return (dictitem_T *)&get_funccal()->fc_l_vars_var;
+}
+
+/// @return  the dict used for argument in the current funccal or
+///          NULL if there is no current funccal.
+dict_T *get_funccal_args_dict(void)
+{
+  if (current_funccal == NULL || current_funccal->fc_l_vars.dv_refcount == 0) {
+    return NULL;
+  }
+  return &get_funccal()->fc_l_avars;
 }
 
 /// @return  the hashtable used for argument in the current funccal or
 ///          NULL if there is no current funccal.
 hashtab_T *get_funccal_args_ht(void)
 {
-  if (current_funccal == NULL) {
-    return NULL;
-  }
-  return &get_funccal()->fc_l_avars.dv_hashtab;
+  dict_T *d = get_funccal_args_dict();
+  return d != NULL ? &d->dv_hashtab : NULL;
 }
 
 /// @return  the a: scope variable or
 ///          NULL if there is no current funccal.
 dictitem_T *get_funccal_args_var(void)
 {
-  if (current_funccal == NULL) {
+  if (current_funccal == NULL || current_funccal->fc_l_vars.dv_refcount == 0) {
     return NULL;
   }
-  return (dictitem_T *)&current_funccal->fc_l_avars_var;
+  return (dictitem_T *)&get_funccal()->fc_l_avars_var;
 }
 
 /// List function variables, if there is a function.
 void list_func_vars(int *first)
 {
-  if (current_funccal != NULL) {
+  if (current_funccal != NULL && current_funccal->fc_l_vars.dv_refcount > 0) {
     list_hashtable_vars(&current_funccal->fc_l_vars.dv_hashtab, "l:", false,
                         first);
   }

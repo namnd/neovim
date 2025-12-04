@@ -14,9 +14,9 @@
 #include "nvim/cmdexpand_defs.h"
 #include "nvim/cursor.h"
 #include "nvim/errors.h"
-#include "nvim/eval.h"
 #include "nvim/eval/typval.h"
 #include "nvim/eval/typval_defs.h"
+#include "nvim/eval/vars.h"
 #include "nvim/ex_cmds_defs.h"
 #include "nvim/ex_docmd.h"
 #include "nvim/garray.h"
@@ -46,9 +46,7 @@
 
 #define MENUDEPTH   10          // maximum depth of menus
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "menu.c.generated.h"
-#endif
+#include "menu.c.generated.h"
 
 /// The character for each menu mode
 static char *menu_mode_chars[] = { "n", "v", "s", "o", "i", "c", "tl", "t" };

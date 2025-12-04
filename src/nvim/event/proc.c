@@ -23,9 +23,7 @@
 #include "nvim/os/time.h"
 #include "nvim/ui_client.h"
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "event/proc.c.generated.h"
-#endif
+#include "event/proc.c.generated.h"
 
 // Time for a process to exit cleanly before we send KILL.
 // For PTY processes SIGTERM is sent first (in case SIGHUP was not enough).
@@ -152,7 +150,7 @@ void proc_teardown(Loop *loop) FUNC_ATTR_NONNULL_ALL
 
 void proc_close_streams(Proc *proc) FUNC_ATTR_NONNULL_ALL
 {
-  wstream_may_close(&proc->in);
+  stream_may_close(&proc->in);
   rstream_may_close(&proc->out);
   rstream_may_close(&proc->err);
 }

@@ -18,9 +18,7 @@ typedef struct {
   uv_write_t uv_req;
 } WRequest;
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "event/wstream.c.generated.h"
-#endif
+#include "event/wstream.c.generated.h"
 
 void wstream_init_fd(Loop *loop, Stream *stream, int fd, size_t maxmem)
   FUNC_ATTR_NONNULL_ARG(1) FUNC_ATTR_NONNULL_ARG(2)
@@ -157,7 +155,7 @@ static void write_cb(uv_write_t *req, int status)
 
   if (data->stream->closed && data->stream->pending_reqs == 0) {
     // Last pending write; free the stream.
-    stream_close_handle(data->stream, false);
+    stream_close_handle(data->stream);
   }
 
   xfree(data);
@@ -173,9 +171,4 @@ void wstream_release_wbuffer(WBuffer *buffer)
 
     xfree(buffer);
   }
-}
-
-void wstream_may_close(Stream *stream)
-{
-  stream_may_close(stream, false);
 }
